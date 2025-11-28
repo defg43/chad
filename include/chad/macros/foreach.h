@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2023 defg43
+// Copyright (C) 2023-2025 defg43
 // https://github.com/defg43/
-
-
 
 #ifndef FOREACH_H 
 #define FOREACH_H
 
 #include <assert.h>
-#include "types.h"
+#include "util_macros.h"
 
 #define sized ,,,
 #define of ,,
@@ -24,6 +22,7 @@
 	__builtin_choose_expr(is_struct(arr), arr, dumy.at) = arr;			\
 	__builtin_choose_expr(is_struct(arr), arr, dumy).at;				\
 })
+
 
 #if defined __has_include && __has_include ("str.h")
 #define lengthof(arr) ({												\

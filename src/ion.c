@@ -90,7 +90,7 @@ object_t insertNumberEntry(object_t object, string key, number_t value) {
 object_t insertStringEntry(object_t object, string key, string value) {
     string *key_ = realloc(object.key, sizeof(string) * (object.count + 1));
     obj_t_value_t *value_ = realloc(object.value, sizeof(obj_t_value_t) * (object.count + 1));
-    printf("key: %p\nvalue: %p\n", key, value);
+    printf("key: %p\nvalue: %p\n", key.at , value.at);
     if(key_ == NULL || value_ == NULL) {
         fprintf(stderr, "failed to allocate memory in insertStringEntry\n");
         exit(EXIT_FAILURE);
@@ -149,9 +149,9 @@ string arrayToJson(array_t array) {
     for (size_t i = 0; i < array.count; i++) {
         switch(array.array[i].discriminant) {
             case obj_t_string:
-                ret = append(ret, "\"");
-                ret = append(ret, array.array[i].str);
-                ret = append(ret, "\"");
+                ret = stringAppend(ret, "\"");
+                ret = stringAppend(ret, array.array[i].str);
+                ret = stringAppend(ret, "\"");
             break;
             case obj_t_array:
                 ret = arrayToJson(array.array[i].arr);
@@ -160,26 +160,26 @@ string arrayToJson(array_t array) {
                 ret = objectToJson(array.array[i].obj);
             break;
             case obj_t_null:
-            	ret = append(ret, "null");
+            	ret = stringAppend(ret, "null");
             break;
             case obj_t_true:
-            	ret = append(ret, "true");
+            	ret = stringAppend(ret, "true");
             break;
             case obj_t_false:
-            	ret = append(ret, "false");
+            	ret = stringAppend(ret, "false");
             break;
             case obj_t_number:
                 string temp = numberToString(array.array[i].num);
-                ret = append(ret, temp);
+                ret = stringAppend(ret, temp);
                 destroyString(temp);
             break;
             default:
         }
         if(i < array.count - 1) {
-            ret = append(ret, ", ");
+            ret = stringAppend(ret, ", ");
         }
     }
-    ret = append(ret, "]");
+    ret = stringAppend(ret, "]");
     return ret;
 }
 
@@ -300,7 +300,7 @@ bool parseString(string json, size_t *pos, obj_t_value_t *result) {
 	size_t start = *pos;
 	while((*pos)++, delta++, json.at[*pos] && (json.at[*pos] != '"' || json.at[*pos - 1] == '\\'));
 	if(json.at[*pos] == '"') {
-		string substr = sliceFromString(json, start, start + delta);
+		string substr = stringSliceFromString(json, start, start + delta);
 		*result = (obj_t_value_t) {
 			.discriminant = obj_t_string,
 			.str = substr,
@@ -460,51 +460,51 @@ string objectToJson(object_t object) {
     ret =  string("{");
     printf("json: there are currently %ld entries\n", object.count);
     for (size_t i = 0; i < object.count; i++) {
-        ret = append(ret, "\"");
-        ret = append(ret, object.key[i]);
-        ret = append(ret, "\"");
-        ret = append(ret, " : ");
+        ret = stringAppend(ret, "\"");
+        ret = stringAppend(ret, object.key[i]);
+        ret = stringAppend(ret, "\"");
+        ret = stringAppend(ret, " : ");
 
         switch(object.value[i].discriminant) {
             case obj_t_string:
-                ret = append(ret, "\"");
-                ret = append(ret, object.value[i].str);
-                ret = append(ret, "\"");
+                ret = stringAppend(ret, "\"");
+                ret = stringAppend(ret, object.value[i].str);
+                ret = stringAppend(ret, "\"");
             break;
             case obj_t_array:
                 string array_result = arrayToJson(object.value[i].arr);
-                ret = append(ret, array_result);
+                ret = stringAppend(ret, array_result);
                 destroyString(array_result);
             break;
             case obj_t_obj:
                 string object_result = objectToJson(object.value[i].obj);
-                ret = append(ret, object_result);
+                ret = stringAppend(ret, object_result);
                 destroyString(object_result);
             break;
             case obj_t_null:
-                ret = append(ret, "null");
+                ret = stringAppend(ret, "null");
             break;
             case obj_t_true:
-                ret = append(ret, "true");
+                ret = stringAppend(ret, "true");
             break;
             case obj_t_false:
-                ret = append(ret, "false");
+                ret = stringAppend(ret, "false");
             break;
             case obj_t_number:
                 string temp = numberToString(object.value[i].num);
-                ret = append(ret, temp);
+                ret = stringAppend(ret, temp);
                 destroyString(temp);
             break;
             default:
-                ret = append(ret, "null");
+                ret = stringAppend(ret, "null");
             break;
         }
         if(i != object.count - 1) {
-            ret = append(ret, ", ");        
+            ret = stringAppend(ret, ", ");        
         }
     }
 
-    ret = append(ret, "}");
+    ret = stringAppend(ret, "}");
     return ret;
 }
 
@@ -517,7 +517,7 @@ string numberToString(number_t number) {
             while(number.as_uint64_t > 0) {
                 digit[0] = '0' + number.as_uint64_t % 10;
                 number.as_uint64_t /= 10;
-                ret = append(ret, digit);
+                ret = stringAppend(ret, digit);
             }
             stringReverse(ret);
         break;
@@ -529,10 +529,10 @@ string numberToString(number_t number) {
             while(number.as_int64_t > 0) {
                 digit[0] = '0' + number.as_int64_t % 10;
                 number.as_int64_t /= 10;
-                ret = append(ret, digit);
+                ret = stringAppend(ret, digit);
             }
             if(needs_sign) {
-                ret = append(ret, "-");
+                ret = stringAppend(ret, "-");
                 needs_sign = false;
             }
             stringReverse(ret);
@@ -551,10 +551,10 @@ string numberToString(number_t number) {
                 snprintf(num_buff, MAX_FLOAT_DIGITS, "%.6g", number.as_float);
                 #undef MAX_FLOAT_DIGITS
                 if(needs_sign) {
-                    ret = append(ret, "-");
+                    ret = stringAppend(ret, "-");
                     needs_sign = false;
                 }
-                ret = append(ret, num_buff);
+                ret = stringAppend(ret, num_buff);
             }
         break;
         case number_t_double:
@@ -571,10 +571,10 @@ string numberToString(number_t number) {
                 snprintf(num_buff, MAX_FLOAT_DIGITS, "%.15g", number.as_double);
                 #undef MAX_FLOAT_DIGITS
                 if(needs_sign) {
-                    ret = append(ret, "-");
+                    ret = stringAppend(ret, "-");
                     needs_sign = false;
                 }
-                ret = append(ret, num_buff);
+                ret = stringAppend(ret, num_buff);
             }
         break;
         case number_t_long_double:
@@ -588,13 +588,13 @@ string numberToString(number_t number) {
                 // man, i sure do hope this fixed stack buffer is enough to hold my string
                 // what could possibly go wrong?
                 char num_buff[MAX_FLOAT_DIGITS]; 
-                snprintf(num_buff, MAX_FLOAT_DIGITS, "%.18g", number.as_long_double);
+                snprintf(num_buff, MAX_FLOAT_DIGITS, "%.18Lg", number.as_long_double);
                 #undef MAX_FLOAT_DIGITS
                 if(needs_sign) {
-                    ret = append(ret, "-");
+                    ret = stringAppend(ret, "-");
                     needs_sign = false;
                 }
-                ret = append(ret, num_buff);
+                ret = stringAppend(ret, num_buff);
             }
         
         default:
@@ -822,5 +822,7 @@ int valcmp(obj_t_value_t val1, obj_t_value_t val2) {
         case obj_t_obj:
             break;
         default:;
+        	break;
     }
+    return 0;
 } 

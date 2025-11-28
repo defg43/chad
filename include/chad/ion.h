@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2023-2025 defg43
+// https://github.com/defg43/
+
 #ifndef _ION_H_
 #define _ION_H_
-
-/*
-	ion.h
-	ion stands for internal object notation
-	it is fully compliant with the json specification
-*/
 
 #include <stdint.h>
 #include <stdbool.h>

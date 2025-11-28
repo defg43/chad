@@ -1,7 +1,10 @@
 #include "../include/chad.h"
 #include <stdio.h>
 
+
+int test_parser();
+
 int main() {
-	puts("tests go here\n");
+	test_parser();
   	return 0;
 }

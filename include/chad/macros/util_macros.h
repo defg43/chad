@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2023 defg43
+// Copyright (C) 2023-2025 defg43
 // https://github.com/defg43/
 
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef UTIL_MACROS_H
+#define UTIL_MACROS_H
 
 // php to generate the ladders
 /*<?php
@@ -534,4 +534,4 @@ switch_expr(\
 	_adjust_compare_arg(_b), min_size(_a, _b) ); })
 
 #endif // not __cplusplus
-#endif /* TYPES_H */
+#endif /* UTIL_MACROS_H */

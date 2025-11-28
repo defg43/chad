@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2023 defg43
+// Copyright (C) 2023-2025 defg43
 // https://github.com/defg43/
 
 #ifndef LOOP_H

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2023 defg43
+// Copyright (C) 2023-2025 defg43
 // https://github.com/defg43/
 
 #ifndef MATCH_H
 #define MATCH_H
 
 #include <stdbool.h>
-#include "types.h"
+#include "util_macros.h"
 
 #define _matchany_foreach(F, a,...) __VA_OPT__(_matchany_foreach_ladder0(F, a, __VA_ARGS__))
 #define _matchany_foreach_ladder0(F, a, n, ...) F(_0, n) __VA_OPT__(_matchany_foreach_ladder1(F, a, __VA_ARGS__))
