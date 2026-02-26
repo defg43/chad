@@ -252,11 +252,10 @@ void stringBuilderClear(stringBuilder_t *sb);
 void stringBuilderDestroy(stringBuilder_t *sb);
 string stringRemoveDuplicates(string str);
 string stringIntersect(string str1, string str2);
-string stringUnion(string str1, string str2);
 string stringEscapeC(string str);
 string stringUnescapeC(string str);
 string stringBase64Encode(string str);
-string stringBase64Decode(string str);
+string stringBase64Decode(string str); // currently not implemented
 bool stringMatchWildcard(string str, string pattern);
 bool stringMatchGlob(string str, string pattern);
 size_t stringLevenshteinDistance(string str1, string str2);

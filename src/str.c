@@ -1302,9 +1302,7 @@ string stringFromBool(bool value) {
     return value ? string("true") : string("false");
 }
 
-// =============================================================================
-// STRING HASHING AND COMPARISON
-// =============================================================================
+// string and hashing
 
 uint32_t stringHash(string str) {
     // FNV-1a hash algorithm
@@ -1324,36 +1322,6 @@ uint64_t stringHash64(string str) {
         hash *= 1099511628211ULL;
     }
     return hash;
-}
-
-int stringCompareNatural(string a, string b) {
-    size_t i = 0, j = 0;
-    
-    while(i < stringlen(a) && j < stringlen(b)) {
-        if(isdigit((unsigned char)a.at[i]) && isdigit((unsigned char)b.at[j])) {
-            // Extract numbers
-            long num_a = 0, num_b = 0;
-            while(i < stringlen(a) && isdigit((unsigned char)a.at[i])) {
-                num_a = num_a * 10 + (a.at[i] - '0');
-                i++;
-            }
-            while(j < stringlen(b) && isdigit((unsigned char)b.at[j])) {
-                num_b = num_b * 10 + (b.at[j] - '0');
-                j++;
-            }
-            if(num_a != num_b) {
-                return num_a < num_b ? -1 : 1;
-            }
-        } else {
-            if(a.at[i] != b.at[j]) {
-                return (int)(unsigned char)a.at[i] - (int)(unsigned char)b.at[j];
-            }
-            i++;
-            j++;
-        }
-    }
-    
-    return (int)stringlen(a) - (int)stringlen(b);
 }
 
 stringBuilder_t stringBuilderCreate(size_t initial_capacity) {
@@ -1665,27 +1633,6 @@ string stringBase64Encode(string str) {
     return (string) { .data = (dataSegmentOfString_t *)result->data };
 }
 
-string stringUrlEncode(string str) {
-    stringBuilder_t sb = stringBuilderCreate(stringlen(str) * 3);
-    
-    for(size_t i = 0; i < stringlen(str); i++) {
-        unsigned char ch = (unsigned char)str.at[i];
-        if(isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
-            stringBuilderAppendChar(&sb, ch);
-        } else if(ch == ' ') {
-            stringBuilderAppendChar(&sb, '+');
-        } else {
-            char encoded[4];
-            snprintf(encoded, sizeof(encoded), "%%%02X", ch);
-            stringBuilderAppendCStr(&sb, encoded);
-        }
-    }
-    
-    string result = stringBuilderToString(&sb);
-    stringBuilderDestroy(&sb);
-    return result;
-}
-
 bool stringMatchWildcard(string str, string pattern) {
     size_t s = 0, p = 0;
     size_t star_idx = (size_t)-1;
@@ -1716,11 +1663,7 @@ bool stringMatchWildcard(string str, string pattern) {
     return p == stringlen(pattern);
 }
 
-bool stringMatchGlob(string str, string pattern) {
-    return stringMatchWildcard(str, pattern);
-}
-
-int stringLevenshteinDistance(string a, string b) {
+size_t stringLevenshteinDistance(string a, string b) {
     size_t len_a = stringlen(a);
     size_t len_b = stringlen(b);
     
@@ -1761,13 +1704,6 @@ int stringLevenshteinDistance(string a, string b) {
     free(prev_row);
     free(curr_row);
     return result;
-}
-
-double stringSimilarity(string a, string b) {
-    int distance = stringLevenshteinDistance(a, b);
-    size_t max_len = stringlen(a) > stringlen(b) ? stringlen(a) : stringlen(b);
-    if(max_len == 0) return 1.0;
-    return 1.0 - ((double)distance / (double)max_len);
 }
 
 string stringToTitleCase(string str) {
