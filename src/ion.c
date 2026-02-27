@@ -596,7 +596,7 @@ string numberToString(number_t number) {
                 }
                 ret = stringAppend(ret, num_buff);
             }
-        
+        	break;
         default:
             fprintf(stderr, "unknown number discriminant\n");
             exit(EXIT_FAILURE);

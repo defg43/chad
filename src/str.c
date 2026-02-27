@@ -1605,6 +1605,7 @@ string stringBase64Encode(string str) {
             array_4[3] = array_3[2] & 0x3f;
             
             for(i = 0; i < 4; i++) {
+            	assert((j - 3 + i) >= 0);
                 result->data[j - 3 + i] = base64_chars[array_4[i]];
             }
             i = 0;

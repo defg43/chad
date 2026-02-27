@@ -628,7 +628,7 @@ static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry
                     is->index = save_pos;
                     iterstringReset(is);
                 }
-                if(!matched) {
+                if(!matched) {	
                     destroyObject(result);
                     return (option(obj_t_value_t)) none;
                 }
@@ -662,7 +662,6 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
         fprintf(stderr, "Start rule '%s' not found in grammar\n", start_rule.at);
         return obj;
     }
-
     
     grammar_entry_t *start_entry = &gram->entry.at[start_idx.value];
 
