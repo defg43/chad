@@ -136,49 +136,61 @@ object_t insertNullEntry(object_t object, string key) {
     } 
     object.key = key_;
     object.value = value_;
-    object.key[object.count] = key; // key is just absorbed here and owned here from now on
-    // this should be sourced from the string allocator backend once it is implemented
+    object.key[object.count] = key;
     object.value[object.count].discriminant = obj_t_null;
     object.count++;
     return object;
 }
 
 string arrayToJson(array_t array) {
-    string ret;
-        ret =  string("[");
+    string ret = string("[");
+
     for (size_t i = 0; i < array.count; i++) {
         switch(array.array[i].discriminant) {
             case obj_t_string:
                 ret = stringAppend(ret, "\"");
                 ret = stringAppend(ret, array.array[i].str);
                 ret = stringAppend(ret, "\"");
-            break;
-            case obj_t_array:
-                ret = arrayToJson(array.array[i].arr);
-            break;
-            case obj_t_obj: 
-                ret = objectToJson(array.array[i].obj);
-            break;
+                break;
+            
+            case obj_t_array: {
+                string temp = arrayToJson(array.array[i].arr);
+                ret = stringAppend(ret, temp);
+                destroyString(temp); 
+                break;
+            }
+            
+            case obj_t_obj: {
+                string temp = objectToJson(array.array[i].obj);
+                ret = stringAppend(ret, temp);
+                destroyString(temp); 
+                break;
+            }
+            
             case obj_t_null:
-            	ret = stringAppend(ret, "null");
-            break;
+                ret = stringAppend(ret, "null");
+                break;
             case obj_t_true:
-            	ret = stringAppend(ret, "true");
-            break;
+                ret = stringAppend(ret, "true");
+                break;
             case obj_t_false:
-            	ret = stringAppend(ret, "false");
-            break;
-            case obj_t_number:
+                ret = stringAppend(ret, "false");
+                break;
+            case obj_t_number: {
                 string temp = numberToString(array.array[i].num);
                 ret = stringAppend(ret, temp);
                 destroyString(temp);
-            break;
+                break;
+            }
             default:
+                break;
         }
+
         if(i < array.count - 1) {
             ret = stringAppend(ret, ", ");
         }
     }
+
     ret = stringAppend(ret, "]");
     return ret;
 }

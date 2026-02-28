@@ -489,6 +489,21 @@ static string flattenToString(obj_t_value_t val) {
     }
 }
 
+#include "../include/chad/macros/foreach.h"
+
+void printValue(obj_t_value_t val) {
+    if (val.discriminant == obj_t_string) {
+        printf("\"%s\"", val.str);
+    } else if (val.discriminant == obj_t_array) {
+        printf("[");
+        for (size_t i = 0; i < val.arr.count; i++) {
+            printValue(val.arr.array[i]); // Recursive call
+            if (i < val.arr.count - 1) printf(", ");
+        }
+        printf("]");
+    }
+}
+
 static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram) {
     if(rule->literal_or_rule == is_literal) {
         if(!parseLiteralFromInput(is, rule->literal)) {
@@ -519,14 +534,16 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
             
             while(1) {
                 size_t save_pos = is->index;
+              
                 option(obj_t_value_t) next = executeGrammarEntry(is, rule->ge, gram);
                 if(!next.valid) {
+                
                     is->index = save_pos;
                     break;
                 }
                 arr = insertIntoArray(arr, next.value);
             }
-            
+                   		
             obj_t_value_t ret = {
                 .discriminant = obj_t_array,
                 .arr = arr
