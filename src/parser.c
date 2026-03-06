@@ -183,23 +183,31 @@ option(rule_t) compileRule(iterstring_t *rule) {
             rule->index++;
             iterstringAdvance(rule);
             parseWhitespace(rule);
-            
-            option(string) rule_name = parseIdentifier(rule);
-            if(!rule_name.valid) {
-                destroyString(res.value);
-                return (option(rule_t)) none;
-            }
-            
-            rule_t ret = {
-                .storage_key = some(res.value),
-                .literal_or_rule = is_rule,
-                .rule_name = rule_name.value,
-                .ge = NULL,
-                .type_mod = parseTypeModifier(rule),
-            };
-            return (option(rule_t)) some(ret);
+
+			option(string) rule_name = parseIdentifier(rule);
+			if(rule_name.valid) {
+				rule_t ret = {
+					.type_mod = parseTypeModifier(rule),
+					.storage_key = res,
+					.literal_or_rule = is_rule,
+					.rule_name = rule_name.value,
+					.ge = NULL,
+				};
+				return (option(rule_t)) some(ret);
+			}
+
+			option(string) literal = parseLiteral(rule);
+			if(literal.valid) {
+				rule_t ret = {
+					.type_mod = parseTypeModifier(rule),
+					.storage_key = res,
+					.literal_or_rule = is_literal,
+					.literal = literal.value,	
+				};
+				return (option(rule_t)) some(ret);
+			}
+			return (option(rule_t)) none;
         } else {
-            // Just a rule reference, no storage key
             rule_t ret = {
                 .storage_key = none,
                 .literal_or_rule = is_rule,
@@ -317,6 +325,7 @@ option(grammar_entry_t) compileGrammarEntry(string rule_definition) {
     
     if(ret.element.count == 0) {
         fprintf(stderr, "Rule '%s' has no elements\n", ret.name.at);
+        fprintf(stderr, "ret.element.count: %ld\n", ret.element.count);
         destroyString(ret.name);
         destroy_dynarray(ret.element);
         return (option(grammar_entry_t)) none;
@@ -727,7 +736,7 @@ void printParsingMessage(FILE *stream, char *msg, string source,
         (color_start < stringlen(source)) && 
         (color_stop < stringlen(source)));
     
-    for(size_t i = 0; i < stringlen(source); i++) {
+	for(size_t i = 0; i < stringlen(source); i++) {
         if(i == color_start) {
             fprintf(stream, "%s", color);
         }

@@ -67,8 +67,7 @@ typedef struct {
 			grammar_entry_t *ge;
 		};
 		string literal;
-	};
-	
+	};	
 } rule_t;
 
 typedef struct {

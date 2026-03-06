@@ -55,7 +55,6 @@ void printSubstring(substring_t substr);
 int getIdentifierIndex(char *input, size_t index);
 char *getIdentifier(char *input);
 char *positionalInsert(char *buf, dictionary_t dictionary);
-
 int vasprintf(char **str, const char *fmt, va_list args);
 int asprintf (char **str, const char *fmt, ...);
 
