@@ -119,62 +119,61 @@ typedef struct {
 } parserTest_t;
 
 void runRuleVSInputTest(char *grammar, char *test_input) {
-	string input = string(test_input);
-	dynarray(string) rules = stringTokenize(grammar, ";");
-	
-	foreach(string to_print of rules) {
-		printf("the rules is: %s\n", to_print.at);
-	}
+    string input = string(test_input);
+    dynarray(string) rules = stringTokenize(grammar, ";");
+
+    foreach(string to_print of rules) {
+        printf("rule: %s\n", to_print.at);
+    }
 
 	// note to self: Name thy macro as its type, 
-	// for fear that casting unto T (*)[] shall fall into utter despair.
+    // for fear that casting unto T (*)[] shall fall into utter despair.
 
-	// local typedef
+    typedef string string_standin_t;
+    option(grammar_t) testg = compileGrammar(rules.count,
+        (string_standin_t (*)[rules.count])rules.at);
 
-	typedef string string_standin_t; 
+    printf("=================================================\n\n");
 
-	option(grammar_t) testg = compileGrammar(rules.count, 
-    	(string_standin_t (*)[rules.count])&rules.at);
-    if(testg.valid) {
-    	printf("=================================================\n\n");
+    if (!testg.valid) {
+        printf("✗ Failed to compile grammar\n");
+        goto cleanup;
+    }
 
-        printf("✓ Grammar compilation successful\n");
-        printf("Grammar has %zu entries\n\n", testg.value.entry.count);
-        
-        printGrammar(testg.value);
+    printf("✓ Grammar compilation successful\n");
+    printf("Grammar has %zu entries\n\n", testg.value.entry.count);
+    printGrammar(testg.value);
 
-        bool success = linkGrammar(&testg.value);
-        if(success) {
-            printf("✓ Linking passed\n\n");
-        } else {
-            printf("✗ Linking failed\n\n");
-        }
+    if (!linkGrammar(&testg.value)) {
+        printf("✗ Linking failed\n\n");
+        destroyGrammar(&testg.value);
+        goto cleanup;
+    }
 
-		string entry = string("entry");
-		object_t empty_obj = createEmptyObject();
-		
-        object_t obj = parseIntoObject(empty_obj, input, 
-            &testg.value, entry);
+    printf("✓ Linking passed\n\n");
 
-		destroyString(entry);
-		
-        string result = objectToJson(obj);
+    {
+        string entry     = string("entry");
+        object_t obj     = parseIntoObject(createEmptyObject(), input,
+                               &testg.value, entry);
+        string result    = objectToJson(obj);
+
         printf("Parse result: %s\n", result.at);
 
         destroyString(result);
         destroyObject(obj);
+        destroyString(entry);
         destroyGrammar(&testg.value);
-    } else {
-        printf("✗ Failed to compile grammar\n");
     }
 
+cleanup:
+    printf("=================================================\n\n");
 
-   	printf("=================================================\n\n");
-
-	foreach(string to_destroy of rules) {
-		destroyString(to_destroy);	
-	}
-	destroyString(input);	
+    foreach(string to_destroy of rules) {
+        destroyString(to_destroy);
+    }
+    destroy_dynarray(rules);
+    destroyString(input);
 }
 
 void runTests(size_t count, parserTest_t (*tests)[count]) {
