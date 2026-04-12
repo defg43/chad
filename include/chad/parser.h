@@ -29,9 +29,33 @@ rule -> t1:token '(' t2:token ')'
 the modifiers are [] which searches for at least one or more occurences, ? 
 which looks for one or none occurences
 
+it is also possible to write rules inline by writing key:(definition), the key is also optional like with other rules
+
 in addition there are alternatives that can be used between elements where only one alternative 
 needs to succeed. The first matched alternative has priority; matching will stop after the first
 successfull match
+
+alternatives (|) has low binding strength, so that a b c | d e f is equivalent to (a b c) | (d e f)
+*/
+/* examples:
+r1 -> 'a'
+r2 -> a:'a'
+r3 -> a:r2
+r4 -> a:r2 b:r3
+r5 -> r4
+r6 -> r4 r5
+r7 -> r4 | r5
+r8 -> r4 r5 | r6 r7
+r9 -> a:r4 b:r5 c:r6 d:r7
+r10 -> r4 (r5 | r6) r7
+r11 -> a:r4 b:(r5 | r6 r7 'a')
+r12 -> a:r4 b:(a:r5 | b:'abc' c:'def') '1234' c:'1234'
+r13 -> a:r1[]
+r14 -> a:r1?
+r15 -> a:r1[]?
+r16 -> 'a'[]
+r17 -> 'a'?
+r18 -> 'a'[]?
 */
 
 #include "cstl.h"
