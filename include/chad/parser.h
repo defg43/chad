@@ -70,21 +70,25 @@ typedef struct {
 	};	
 } rule_t;
 
+// Typedefs for nested dynarrays (due to C macro limitations)
+typedef dynarray(rule_t) rule_sequence_t;  // A sequence of rules forming one alternative
+typedef dynarray(rule_sequence_t) rule_alternatives_t;  // Multiple sequences as alternatives
+
 typedef struct {
 	enum {
-		is_regular,
-		has_alternative,
-	} alternative_or_regular;
+		is_sequence,        // Single sequence of rules: a b c
+		is_alternative,     // Multiple alternatives: (a b) | (c d) | e
+	} sequence_or_alternative;
 	union {
-		dynarray(rule_t) alternative;
-		rule_t rule;
+		rule_sequence_t sequence;      // Single sequence: [rule1, rule2, ...]
+		rule_alternatives_t alternatives;  // Alternatives: [[rule1, rule2], [rule3], ...]
 	};
 } rule_node_t;
 
 struct grammar_entry {
 	string name;
 	rule_type_t rule_type;
-	dynarray(rule_node_t) element;
+	rule_node_t element;  // Changed from dynarray to single rule_node_t (which can be sequence or alternatives)
 };
 
 typedef struct {

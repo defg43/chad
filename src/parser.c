@@ -5,6 +5,28 @@
 #include <assert.h>
 #include <string.h>
 
+// Thread-local storage for anonymous rules generated during parsing
+// Used by compileRule when it encounters grouped expressions: (...)
+typedef struct {
+    dynarray(grammar_entry_t) rules;
+    size_t anonymous_rule_counter;
+} anonymous_rules_context_t;
+
+static anonymous_rules_context_t anon_context = {
+    .rules = {0},
+    .anonymous_rule_counter = 0
+};
+
+// Generate a unique anonymous rule name
+static string generateAnonymousRuleName(void) {
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "_group_%zu", anon_context.anonymous_rule_counter++);
+    return string(buffer);
+}
+
+// Forward declaration
+option(rule_node_t) compileRuleNode(iterstring_t *rule);
+
 type_modifier_t parseTypeModifier(iterstring_t *rule) {
 	type_modifier_t ret = modifier_none;
 		bool saw_optional = false;
@@ -164,6 +186,50 @@ bool isFollowedByAlternative(iterstring_t *rule) {
 option(rule_t) compileRule(iterstring_t *rule) {
     parseWhitespace(rule);
     
+    // Check for grouped expression: (...)
+    if(rule->str.at[rule->index] == '(') {
+        rule->index++;  // consume '('
+        iterstringAdvance(rule);
+        parseWhitespace(rule);
+        
+        // Parse the full alternation inside parentheses
+        option(rule_node_t) grouped_node = compileRuleNode(rule);
+        
+        if(!grouped_node.valid) {
+            iterstringReset(rule);
+            return (option(rule_t)) none;
+        }
+        
+        parseWhitespace(rule);
+        if(rule->str.at[rule->index] != ')') {
+            iterstringReset(rule);
+            return (option(rule_t)) none;
+        }
+        
+        rule->index++;  // consume ')'
+        iterstringAdvance(rule);
+        
+        // Create an anonymous rule entry for this grouped expression
+        string anon_name = generateAnonymousRuleName();
+        grammar_entry_t entry = {
+            .name = anon_name,
+            .element = grouped_node.value,
+        };
+        
+        // Store the anonymous rule
+        dynarray_append(anon_context.rules, entry);
+        
+        // Return a rule that references the anonymous rule
+        rule_t ret = {
+            .storage_key = none,
+            .literal_or_rule = is_rule,
+            .rule_name = anon_name,
+            .ge = NULL,
+            .type_mod = parseTypeModifier(rule),
+        };
+        return (option(rule_t)) some(ret);
+    }
+    
     option(string) res;
     
     if((res = parseLiteral(rule)).valid) {
@@ -183,6 +249,50 @@ option(rule_t) compileRule(iterstring_t *rule) {
             rule->index++;
             iterstringAdvance(rule);
             parseWhitespace(rule);
+
+            // Check for grouped expression after storage key: key:(...)
+            if(rule->str.at[rule->index] == '(') {
+                rule->index++;  // consume '('
+                iterstringAdvance(rule);
+                parseWhitespace(rule);
+                
+                // Parse the full alternation inside parentheses
+                option(rule_node_t) grouped_node = compileRuleNode(rule);
+                
+                if(!grouped_node.valid) {
+                    iterstringReset(rule);
+                    return (option(rule_t)) none;
+                }
+                
+                parseWhitespace(rule);
+                if(rule->str.at[rule->index] != ')') {
+                    iterstringReset(rule);
+                    return (option(rule_t)) none;
+                }
+                
+                rule->index++;  // consume ')'
+                iterstringAdvance(rule);
+                
+                // Create an anonymous rule entry for this grouped expression
+                string anon_name = generateAnonymousRuleName();
+                grammar_entry_t entry = {
+                    .name = anon_name,
+                    .element = grouped_node.value,
+                };
+                
+                // Store the anonymous rule
+                dynarray_append(anon_context.rules, entry);
+                
+                // Return a rule with storage key that references the anonymous rule
+                rule_t ret = {
+                    .storage_key = res,
+                    .literal_or_rule = is_rule,
+                    .rule_name = anon_name,
+                    .ge = NULL,
+                    .type_mod = parseTypeModifier(rule),
+                };
+                return (option(rule_t)) some(ret);
+            }
 
 			option(string) rule_name = parseIdentifier(rule);
 			if(rule_name.valid) {
@@ -233,43 +343,75 @@ bool parseStringLiterally(iterstring_t *rule, const char *literal) {
     return true;
 }
 
+// compileSequence: Parse a sequence of rules until we hit |, ), or end
+// Returns array of rule_t forming one alternative sequence
+option(rule_sequence_t) compileSequence(iterstring_t *rule) {
+    rule_sequence_t sequence = create_dynarray(rule_t);
+    
+    parseWhitespace(rule);
+    
+    option(rule_t) elem;
+    while((elem = compileRule(rule)).valid) {
+        dynarray_append(sequence, elem.value);
+        parseWhitespace(rule);
+        
+        // Stop if we hit alternation, close paren, or end
+        if(rule->str.at[rule->index] == '|' || 
+           rule->str.at[rule->index] == ')' ||
+           rule->str.at[rule->index] == '\0') {
+            break;
+        }
+    }
+    
+    if(sequence.count == 0) {
+        destroy_dynarray(sequence);
+        return (option(rule_sequence_t)) none;
+    }
+    
+    return (option(rule_sequence_t)) some(sequence);
+}
+
+// compileRuleNode: Parse alternatives (lowest precedence)
+// Collects sequences separated by |
+// Returns rule_node_t with either single sequence or multiple alternatives
 option(rule_node_t) compileRuleNode(iterstring_t *rule) {
     parseWhitespace(rule);
     
-    // Parse first rule
-    option(rule_t) first_rule = compileRule(rule);
-    if(!first_rule.valid) {
+    // Parse first sequence
+    option(rule_sequence_t) first_seq = compileSequence(rule);
+    if(!first_seq.valid) {
         return (option(rule_node_t)) none;
     }
     
     parseWhitespace(rule);
     
-    // Check if there are alternatives
+    // Check if there are alternatives (multiple sequences separated by |)
     if(rule->str.at[rule->index] == '|') {
-        // We have alternatives - collect them
-        dynarray(rule_t) alternatives = create_dynarray(rule_t);
-        dynarray_append(alternatives, first_rule.value);
+        // We have alternatives - collect all sequences
+        rule_alternatives_t alternatives = create_dynarray(rule_sequence_t);
+        dynarray_append(alternatives, first_seq.value);
         
+        // Collect remaining alternatives
         while(isFollowedByAlternative(rule)) {
-            option(rule_t) alt_rule = compileRule(rule);
-            if(!alt_rule.valid) {
+            option(rule_sequence_t) alt_seq = compileSequence(rule);
+            if(!alt_seq.valid) {
                 destroy_dynarray(alternatives);
                 return (option(rule_node_t)) none;
             }
-            dynarray_append(alternatives, alt_rule.value);
+            dynarray_append(alternatives, alt_seq.value);
             parseWhitespace(rule);
         }
         
         rule_node_t node = {
-            .alternative_or_regular = has_alternative,
-            .alternative = alternatives
+            .sequence_or_alternative = is_alternative,
+            .alternatives = alternatives
         };
         return (option(rule_node_t)) some(node);
     } else {
-        // Just a single rule
+        // Just a single sequence
         rule_node_t node = {
-            .alternative_or_regular = is_regular,
-            .rule = first_rule.value
+            .sequence_or_alternative = is_sequence,
+            .sequence = first_seq.value
         };
         return (option(rule_node_t)) some(node);
     }
@@ -292,8 +434,6 @@ option(grammar_entry_t) compileGrammarEntry(string rule_definition) {
         .rule_type = storage_type_not_set,
     };
     
-    ret.element = create_dynarray(rule_node_t);
-    
     if(!parseStringLiterally(&it, "->")) {
         fprintf(stderr, "Expected '->' after rule name '%s'\n", name.value.at);
         destroyString(ret.name);
@@ -302,41 +442,60 @@ option(grammar_entry_t) compileGrammarEntry(string rule_definition) {
     
     parseWhitespace(&it);
     
-    bool has_storage_key = false;
-    option(rule_node_t) node;
+    // Parse the rule body as ONE node (which handles all alternatives/sequences)
+    option(rule_node_t) node = compileRuleNode(&it);
+    if(!node.valid) {
+        fprintf(stderr, "Rule '%s' has no valid content\n", ret.name.at);
+        destroyString(ret.name);
+        return (option(grammar_entry_t)) none;
+    }
     
-    while((node = compileRuleNode(&it)).valid) {
-        if(node.value.alternative_or_regular == is_regular) {
-            if(node.value.rule.storage_key.valid) {
+    // Check that we consumed the entire rule
+    parseWhitespace(&it);
+    if(it.str.at[it.index] != '\0') {
+        fprintf(stderr, "Rule '%s' has unexpected trailing content at position %zu\n", ret.name.at, it.index);
+        destroyString(ret.name);
+        // TODO: properly destroy node
+        return (option(grammar_entry_t)) none;
+    }
+    
+    // Determine rule type and storage keys by analyzing the node
+    bool has_storage_key = false;
+    if(node.value.sequence_or_alternative == is_sequence) {
+        // Single sequence - check for storage keys
+        for(size_t i = 0; i < node.value.sequence.count; i++) {
+            if(node.value.sequence.at[i].storage_key.valid) {
                 has_storage_key = true;
+                break;
             }
-        } else {
-            for(size_t i = 0; i < node.value.alternative.count; i++) {
-                if(node.value.alternative.at[i].storage_key.valid) {
+        }
+    } else {
+        // Alternatives - check all sequences for storage keys
+        for(size_t alt_idx = 0; alt_idx < node.value.alternatives.count; alt_idx++) {
+            for(size_t seq_idx = 0; seq_idx < node.value.alternatives.at[alt_idx].count; seq_idx++) {
+                if(node.value.alternatives.at[alt_idx].at[seq_idx].storage_key.valid) {
                     has_storage_key = true;
                     break;
                 }
             }
+            if(has_storage_key) break;
         }
-        
-        dynarray_append(ret.element, node.value);
-        parseWhitespace(&it);
     }
     
-    if(ret.element.count == 0) {
-        fprintf(stderr, "Rule '%s' has no elements\n", ret.name.at);
-        fprintf(stderr, "ret.element.count: %ld\n", ret.element.count);
-        destroyString(ret.name);
-        destroy_dynarray(ret.element);
-        return (option(grammar_entry_t)) none;
-    }
-    
+    ret.element = node.value;
     ret.rule_type = has_storage_key ? object_storage : implicit_storage;
     
     return (option(grammar_entry_t)) some(ret);
 }
 
 option(grammar_t) compileGrammar(size_t count, typeof(string) (*rules)[count]) {
+    // Reset anonymous rule context for this compilation
+    anon_context.anonymous_rule_counter = 0;
+    if(anon_context.rules.at != NULL) {
+        free(anon_context.rules.at);
+    }
+    anon_context.rules = create_dynarray(grammar_entry_t);
+    
     grammar_t gram;
     gram.entry = create_dynarray(grammar_entry_t);
     
@@ -350,6 +509,14 @@ option(grammar_t) compileGrammar(size_t count, typeof(string) (*rules)[count]) {
         }
         dynarray_append(gram.entry, entry.value);
     }
+    
+    // Append all anonymous rules that were created during parsing
+    for(size_t i = 0; i < anon_context.rules.count; i++) {
+        dynarray_append(gram.entry, anon_context.rules.at[i]);
+    }
+    
+    // Clear the anonymous rules context (but don't free, as entries are now owned by grammar)
+    anon_context.rules.count = 0;
     
     return (option(grammar_t)) some(gram);
 }
@@ -376,12 +543,24 @@ bool linkRule(rule_t *rule, grammar_t *gram) {
     return true;
 }
 
+// Helper: Link all rules in a sequence
+bool linkSequence(rule_sequence_t *sequence, grammar_t *gram) {
+    for(size_t i = 0; i < sequence->count; i++) {
+        if(!linkRule(&sequence->at[i], gram)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Helper: Link all rules in a rule_node_t (which can be sequence or alternatives)
 bool linkRuleNode(rule_node_t *node, grammar_t *gram) {
-    if(node->alternative_or_regular == is_regular) {
-        return linkRule(&node->rule, gram);
+    if(node->sequence_or_alternative == is_sequence) {
+        return linkSequence(&node->sequence, gram);
     } else {
-        for(size_t i = 0; i < node->alternative.count; i++) {
-            if(!linkRule(&node->alternative.at[i], gram)) {
+        // Alternatives - link all sequences
+        for(size_t i = 0; i < node->alternatives.count; i++) {
+            if(!linkSequence(&node->alternatives.at[i], gram)) {
                 return false;
             }
         }
@@ -394,15 +573,44 @@ bool linkGrammar(grammar_t *gram) {
     
     for(size_t i = 0; i < gram->entry.count; i++) {
         grammar_entry_t *entry = &gram->entry.at[i];
-        
-        for(size_t j = 0; j < entry->element.count; j++) {
-            if(!linkRuleNode(&entry->element.at[j], gram)) {
-                return false;
-            }
+        if(!linkRuleNode(&entry->element, gram)) {
+            return false;
         }
     }
     
     return true;
+}
+
+void destroyRule(rule_t *rule) {
+    if(rule->storage_key.valid) {
+        destroyString(rule->storage_key.value);
+    }
+    if(rule->literal_or_rule == is_literal) {
+        destroyString(rule->literal);
+    } else {
+        destroyString(rule->rule_name);
+    }
+}
+
+void destroySequence(rule_sequence_t *seq) {
+    for(size_t i = 0; i < seq->count; i++) {
+        destroyRule(&seq->at[i]);
+    }
+    if(seq->at) {
+        free(seq->at);
+    }
+}
+
+void destroyRuleNode(rule_node_t *node) {
+    if(node->sequence_or_alternative == is_sequence) {
+        destroySequence(&node->sequence);
+    } else {
+        // Alternatives - destroy all sequences
+        for(size_t i = 0; i < node->alternatives.count; i++) {
+            destroySequence(&node->alternatives.at[i]);
+        }
+        destroy_dynarray(node->alternatives);
+    }
 }
 
 void destroyGrammar(grammar_t *gram) {
@@ -411,42 +619,14 @@ void destroyGrammar(grammar_t *gram) {
     for(size_t i = 0; i < gram->entry.count; i++) {
         grammar_entry_t *entry = &gram->entry.at[i];
         destroyString(entry->name);
-        
-        for(size_t j = 0; j < entry->element.count; j++) {
-            rule_node_t *node = &entry->element.at[j];
-            
-            if(node->alternative_or_regular == has_alternative) {
-                for(size_t k = 0; k < node->alternative.count; k++) {
-                    rule_t *rule = &node->alternative.at[k];
-                    if(rule->storage_key.valid) {
-                        destroyString(rule->storage_key.value);
-                    }
-                    if(rule->literal_or_rule == is_literal) {
-                        destroyString(rule->literal);
-                    } else {
-                        destroyString(rule->rule_name);
-                    }
-                }
-                destroy_dynarray(node->alternative);
-            } else {
-                rule_t *rule = &node->rule;
-                if(rule->storage_key.valid) {
-                    destroyString(rule->storage_key.value);
-                }
-                if(rule->literal_or_rule == is_literal) {
-                    destroyString(rule->literal);
-                } else {
-                    destroyString(rule->rule_name);
-                }
-            }
-        }
-        destroy_dynarray(entry->element);
+        destroyRuleNode(&entry->element);
     }
     destroy_dynarray(gram->entry);
 }
 
 static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram);
-static option(obj_t_value_t) executeRuleNode(iterstring_t *is, rule_node_t *node, grammar_t *gram);
+static option(obj_t_value_t) executeSequence(iterstring_t *is, rule_sequence_t *sequence, grammar_t *gram, rule_type_t rule_type);
+static option(obj_t_value_t) executeRuleNode(iterstring_t *is, rule_node_t *node, grammar_t *gram, rule_type_t rule_type);
 static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry_t *entry, grammar_t *gram);
 
 static bool parseLiteralFromInput(iterstring_t *is, string literal) {
@@ -577,51 +757,37 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
     }
 }
 
-static option(obj_t_value_t) executeRuleNode(iterstring_t *is, rule_node_t *node, grammar_t *gram) {
-    if(node->alternative_or_regular == is_regular) {
-        return executeRule(is, &node->rule, gram);
-    } else {
-        for(size_t i = 0; i < node->alternative.count; i++) {
-            option(obj_t_value_t) result = executeRule(is, &node->alternative.at[i], gram);
-            if(result.valid) {
-                return result;
-            }
-            iterstringReset(is);
-        }
-        return (option(obj_t_value_t)) none;
-    }
-}
-
-static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry_t *entry, grammar_t *gram) {
-    if(entry->rule_type == implicit_storage) {
+// Execute a sequence of rules
+static option(obj_t_value_t) executeSequence(iterstring_t *is, rule_sequence_t *sequence, grammar_t *gram, rule_type_t rule_type) {
+    if(rule_type == implicit_storage) {
+        // Implicit storage: concatenate all outputs as strings
         string result = string("");
         
-        for(size_t i = 0; i < entry->element.count; i++) {
-            option(obj_t_value_t) val = executeRuleNode(is, &entry->element.at[i], gram);
+        for(size_t i = 0; i < sequence->count; i++) {
+            option(obj_t_value_t) val = executeRule(is, &sequence->at[i], gram);
             if(!val.valid) {
                 destroyString(result);
                 return (option(obj_t_value_t)) none;
             }
             
             string part = flattenToString(val.value);
-			
             result = stringAppendString(result, part);
-
+            
+            // Destroy intermediate values
             if(val.valid) {
-            	switch(val.value.discriminant) {
-            		case obj_t_string:
-            			destroyString(val.value.str);
-            		break;
-            		case obj_t_obj:
-            			destroyObject(val.value.obj);
-            		break;
-            		case obj_t_array:
-            			destroyArray(val.value.arr);
-            		break;
-            		default:
-            		// dc
-            		break;
-            	}
+                switch(val.value.discriminant) {
+                    case obj_t_string:
+                        destroyString(val.value.str);
+                        break;
+                    case obj_t_obj:
+                        destroyObject(val.value.obj);
+                        break;
+                    case obj_t_array:
+                        destroyArray(val.value.arr);
+                        break;
+                    default:
+                        break;
+                }
             }
             destroyString(part);
         }
@@ -633,41 +799,33 @@ static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry
         return (option(obj_t_value_t)) some(ret);
         
     } else {
+        // Object storage: collect keyed values
         object_t result = createEmptyObject();
         
-        for(size_t i = 0; i < entry->element.count; i++) {
-            rule_node_t *node = &entry->element.at[i];
+        for(size_t i = 0; i < sequence->count; i++) {
+            option(obj_t_value_t) val = executeRule(is, &sequence->at[i], gram);
+            if(!val.valid) {
+                destroyObject(result);
+                return (option(obj_t_value_t)) none;
+            }
             
-            if(node->alternative_or_regular == has_alternative) {
-                bool matched = false;
-                for(size_t j = 0; j < node->alternative.count; j++) {
-                    size_t save_pos = is->index;
-                    option(obj_t_value_t) val = executeRule(is, &node->alternative.at[j], gram);
-                    if(val.valid) {
-                        if(node->alternative.at[j].storage_key.valid) {
-                        	string key_copy = node->alternative.at[j].storage_key.value;
-                            result = insertObjectEntry(result, key_copy, val.value);
-                        }
-                        matched = true;
-                        break;
-                    }
-                    is->index = save_pos;
-                    iterstringReset(is);
-                }
-                if(!matched) {	
-                    destroyObject(result);
-                    return (option(obj_t_value_t)) none;
-                }
+            if(sequence->at[i].storage_key.valid) {
+                string key_copy = stringFromString(sequence->at[i].storage_key.value);
+                result = insertObjectEntry(result, key_copy, val.value);
             } else {
-                option(obj_t_value_t) val = executeRule(is, &node->rule, gram);
-                if(!val.valid) {
-                    destroyObject(result);
-                    return (option(obj_t_value_t)) none;
-                }
-                
-                if(node->rule.storage_key.valid) {
-                 	string key_copy = stringFromString(node->rule.storage_key.value);
-                    result = insertObjectEntry(result, key_copy, val.value);
+                // No storage key, discard value
+                switch(val.value.discriminant) {
+                    case obj_t_string:
+                        destroyString(val.value.str);
+                        break;
+                    case obj_t_obj:
+                        destroyObject(val.value.obj);
+                        break;
+                    case obj_t_array:
+                        destroyArray(val.value.arr);
+                        break;
+                    default:
+                        break;
                 }
             }
         }
@@ -678,6 +836,29 @@ static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry
         };
         return (option(obj_t_value_t)) some(ret);
     }
+}
+
+static option(obj_t_value_t) executeRuleNode(iterstring_t *is, rule_node_t *node, grammar_t *gram, rule_type_t rule_type) {
+    if(node->sequence_or_alternative == is_sequence) {
+        // Single sequence
+        return executeSequence(is, &node->sequence, gram, rule_type);
+    } else {
+        // Multiple alternatives - try each until one succeeds
+        for(size_t alt_idx = 0; alt_idx < node->alternatives.count; alt_idx++) {
+            size_t save_pos = is->index;
+            option(obj_t_value_t) result = executeSequence(is, &node->alternatives.at[alt_idx], gram, rule_type);
+            if(result.valid) {
+                return result;
+            }
+            is->index = save_pos;
+            iterstringReset(is);
+        }
+        return (option(obj_t_value_t)) none;
+    }
+}
+
+static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry_t *entry, grammar_t *gram) {
+    return executeRuleNode(is, &entry->element, gram, entry->rule_type);
 }
 
 object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string start_rule) {
