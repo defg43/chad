@@ -708,24 +708,12 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
         	obj = insertObjectEntry(obj, string(result.value.obj.key[i]), 
             	obj_t_value_t_copy(result.value.obj.value[i]));
         }
+        destroyObject(result.value.obj);
     } else {
+        // For non-object results, just use the value directly without copying
+        // (the strings are already properly managed by the parser)
         obj = insertObjectEntry(obj, start_rule, result.value);
     }
-
-	switch(result.value.discriminant) {
-	   	case obj_t_string:
-	   		destroyString(result.value.str);
-	   	break;
-	   	case obj_t_obj:
-	   		destroyObject(result.value.obj);
-	   	break;
-	   	case obj_t_array:
-	    	destroyArray(result.value.arr);
-	    break;
-	    default:
-	    // dc
-		break;
-	}
     return obj;
 }
 
