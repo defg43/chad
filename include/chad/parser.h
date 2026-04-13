@@ -36,8 +36,7 @@ needs to succeed. The first matched alternative has priority; matching will stop
 successfull match
 
 alternatives (|) has low binding strength, so that a b c | d e f is equivalent to (a b c) | (d e f)
-*/
-/* examples:
+*//* examples:
 r1 -> 'a'
 r2 -> a:'a'
 r3 -> a:r2
