@@ -507,33 +507,37 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 				dbg("->%s\n", buf);
 			} else {
 				dbg("entering number construction segment");
-				while(('0' <= buf[run] && buf[run] <= '9') || buf[run] == ' ') {
+				while(buf[run] == ' ') run++;
+				while('0' <= buf[run] && buf[run] <= '9') {
 					temp_number *= 10;
 					temp_number += buf[run] - '0';
 					run++;
-					dbg("constructed number is %ld", temp_number);
-					dbgstr(buf, index, run);
 				} 
+				while(buf[run] == ' ') run++;
 
-				size_t end = run + 1;
-				char end_char;
-				while(end_char = buf[end]) {
-					dbg("end tests");
-					if(end_char == '}') {
-						// end found
-
-						// set dictionary_index to the number
-						dictionary_index = temp_number;
-						dbg("dictionary index: %ld\n", dictionary_index);
-						break;
-					} else if(end_char == ' ') {
-						// keep searching for end
-						end++;
-					} else {
-						dbg("no end possible");
-						break;
-						// end not possible
-						// discard results
+				if(buf[run] == '}') {
+					// end found
+					dictionary_index = temp_number;
+					dbg("dictionary index: %ld\n", dictionary_index);
+					
+					if (dictionary_index < dictionary.entry_count) {
+						size_t val_len = dictionary.value[dictionary_index] ? strlen(dictionary.value[dictionary_index]) : 0;
+						size_t tag_len = run - index + 1;
+						size_t new_length = len + val_len - tag_len + 1;
+						
+						if (val_len > tag_len) {
+							buf = realloc(buf, new_length);
+						}
+						memmove(buf + index + val_len, buf + run + 1, len - run);
+						if (val_len < tag_len) {
+							buf = realloc(buf, new_length);
+						}
+						len = new_length - 1;
+						if (val_len != 0) {
+							memcpy(buf + index, dictionary.value[dictionary_index], val_len);
+						}
+						buf[len] = '\0';
+						index += val_len - 1; 
 					}
 				}
 			}

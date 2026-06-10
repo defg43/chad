@@ -645,7 +645,7 @@ static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry
                     option(obj_t_value_t) val = executeRule(is, &node->alternative.at[j], gram);
                     if(val.valid) {
                         if(node->alternative.at[j].storage_key.valid) {
-                        	string key_copy = node->alternative.at[j].storage_key.value;
+                        	string key_copy = stringFromString(node->alternative.at[j].storage_key.value);
                             result = insertObjectEntry(result, key_copy, val.value);
                         }
                         matched = true;
@@ -712,7 +712,7 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
     } else {
         // For non-object results, just use the value directly without copying
         // (the strings are already properly managed by the parser)
-        obj = insertObjectEntry(obj, start_rule, result.value);
+        obj = insertObjectEntry(obj, string(start_rule), result.value);
     }
     return obj;
 }

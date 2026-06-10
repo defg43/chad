@@ -296,6 +296,83 @@ static void test_grow_buffer(void) {
     destroyString(s);
 }
 
+static void test_reverse(void) {
+    printf("\n-- stringReverse --\n");
+
+    string s = stringFromCharPtr("abc");
+    s = stringReverse(s);
+    ASSERT_TRUE("reverse basic", str_ok(s, "cba"));
+    destroyString(s);
+
+    string s2 = stringFromCharPtr("racecar");
+    s2 = stringReverse(s2);
+    ASSERT_TRUE("reverse palindrome", str_ok(s2, "racecar"));
+    destroyString(s2);
+    
+    // UTF-8 reverse test
+    string u = stringFromCharPtr("こんにちは"); // "Hello" in Japanese
+    u = stringReverse(u);
+    // Reversed: "はちにんこ"
+    ASSERT_TRUE("reverse utf-8", str_ok(u, "はちにんこ"));
+    destroyString(u);
+}
+
+static void test_join(void) {
+    printf("\n-- stringJoin --\n");
+
+    dynarray(string) parts = create_dynarray(string);
+    dynarray_append(parts, stringFromCharPtr("a"));
+    dynarray_append(parts, stringFromCharPtr("b"));
+    dynarray_append(parts, stringFromCharPtr("c"));
+
+    string sep = stringFromCharPtr(",");
+    string result = stringJoin(parts, sep);
+    ASSERT_TRUE("join with comma", str_ok(result, "a,b,c"));
+    
+    foreach(string s of parts) destroyString(s);
+    destroy_dynarray(parts);
+    destroyString(sep);
+    destroyString(result);
+}
+
+static void test_format(void) {
+    printf("\n-- stringFormat --\n");
+
+    string s = stringFormat("Hello %d %s", 123, "world");
+    ASSERT_TRUE("format int and string", str_ok(s, "Hello 123 world"));
+    destroyString(s);
+
+    string s2 = stringFormat("%0.2f", 3.14159);
+    ASSERT_TRUE("format float", str_ok(s2, "3.14"));
+    destroyString(s2);
+}
+
+static void test_utf8(void) {
+    printf("\n-- UTF-8 Support --\n");
+
+    string s = stringFromCharPtr("hello");
+    ASSERT_TRUE("utf8 validate ascii", stringUtf8Validate(s));
+    ASSERT_TRUE("utf8 length ascii", stringUtf8Length(s) == 5);
+    destroyString(s);
+
+    string u = stringFromCharPtr("こんにち"); // 4 characters
+    ASSERT_TRUE("utf8 validate japanese", stringUtf8Validate(u));
+    ASSERT_TRUE("utf8 length japanese", stringUtf8Length(u) == 4);
+    
+    size_t bytes_read = 0;
+    utf32_t cp = stringUtf8DecodeAt(u, 0, &bytes_read);
+    ASSERT_TRUE("utf8 decode first char", bytes_read == 3);
+    
+    string first = stringUtf8At(u, 0);
+    ASSERT_TRUE("utf8 at 0", str_ok(first, "こ"));
+    destroyString(first);
+    
+    string third = stringUtf8At(u, 2);
+    ASSERT_TRUE("utf8 at 2", str_ok(third, "に"));
+    destroyString(third);
+
+    destroyString(u);
+}
 
 int test_str(void) {
     test_from_charptr();
@@ -310,6 +387,10 @@ int test_str(void) {
     test_replace();
     test_trim();
     test_grow_buffer();
+    test_reverse();
+    test_join();
+    test_format();
+    test_utf8();
 
     printf("\n");
     if (failed == 0) {
