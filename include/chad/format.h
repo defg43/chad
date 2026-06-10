@@ -119,13 +119,13 @@ void printDictionary(dictionary_t dictionary);
 
 #define dict(...) ({                                					\
     char *dictionary[][2] = __VA_ARGS__;            					\
-    size_t size = lengthof(dictionary);             					\
+    size_t size = (sizeof(dictionary) / sizeof(dictionary[0]));             					\
     createDictionary(size, dictionary);             					\
 })
 
 #define dictDeepCopy(...) ({                        					\
     char *dictionary[][2] = __VA_ARGS__;            					\
-    size_t size = lengthof(dictionary);             					\
+    size_t size = (sizeof(dictionary) / sizeof(dictionary[0]));             					\
     char *copied_dictionary[size][2];               					\
     for(size_t i = 0; i < size; i++) {              					\
         copied_dictionary[i][0] = dictionary[i][0]; 					\
@@ -158,7 +158,7 @@ void printDictionary(dictionary_t dictionary);
         PLEASE_GCC_AND_CLANG_STOP_FIGTHING_OVER_PRAGMAS                 \
         auto tmp = convertKeysToTags(                                   \
 	        dict({ MAP(_createKeyValuePairs, __VA_ARGS__) })); 			\
-        char *ret = format(fmt, tmp);									\
+        char *ret = format(strdup(fmt), tmp);									\
         _Pragma("GCC diagnostic pop");			    			        \
         destroyDictionary(tmp);											\
         ret;                                                            \
