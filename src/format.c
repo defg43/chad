@@ -128,28 +128,26 @@ substring_t substringTrimWhitespace(substring_t substr) {
     }
 
     char *start = substr.start;
-    while (start && start < substr.end && isspace((unsigned char)*start)) {
+    while (start < substr.end && isspace((unsigned char)*start)) {
         start++;
     }
 
+    if (start >= substr.end) {
+        // entire input was whitespace
+        return (substring_t){ start, start };
+    }
+
     char *end = substr.end - 1;
-    while (end && end >= start && isspace((unsigned char)*end)) {
+    while (end > start && isspace((unsigned char)*end)) {
         end--;
     }
 
     dbg("substringTrimWhitespace: ");
-    printSubstring((substring_t){ start, end });
-
-	if(start < end) {
-		return (substring_t) {
-			.start = substr.start, 			
-			.end = substr.start, 
-		};
-	}
+    printSubstring((substring_t){ start, end + 1 });
 
     return (substring_t){
         .start = start, 
-        .end = end,
+        .end = end + 1, // .end is exclusive, so include the last non-whitespace char
     };
 }         
 
@@ -174,7 +172,7 @@ void printSubstring(substring_t substr) {
         return;
     } else {
         char *ptr = substr.start;
-        while(ptr != substr.end || *ptr == '\0') {
+        while(ptr != substr.end && *ptr != '\0') {
             putchar(*ptr);
             if(substr.end > substr.start) {
                 ptr++;
@@ -182,7 +180,6 @@ void printSubstring(substring_t substr) {
                 ptr--;
             }
         }
-        putchar(*ptr);
     }
 }
 

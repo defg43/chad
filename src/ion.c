@@ -1,5 +1,6 @@
 #include "../include/chad/ion.h"
 #include "../include/chad/macros/foreach.h"
+#include "../include/chad/debug.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -36,7 +37,7 @@ object_t insertObjectEntry(object_t object, string key, obj_t_value_t value) {
 }
 
 object_t insertSubobjectEntry(object_t object, string key, object_t value) {
-    printf("there are currently %ld entries in the object\n", object.count);
+    dbg("there are currently %ld entries in the object\n", object.count);
     string *key_ = realloc(object.key, sizeof(string) * (object.count + 1));
     obj_t_value_t *value_ = realloc(object.value, sizeof(obj_t_value_t) * (object.count + 1));
     if(key_ == NULL || value_ == NULL) {
@@ -90,15 +91,15 @@ object_t insertNumberEntry(object_t object, string key, number_t value) {
 object_t insertStringEntry(object_t object, string key, string value) {
     string *key_ = realloc(object.key, sizeof(string) * (object.count + 1));
     obj_t_value_t *value_ = realloc(object.value, sizeof(obj_t_value_t) * (object.count + 1));
-    printf("key: %p\nvalue: %p\n", key.at , value.at);
+    dbg("key: %p\nvalue: %p\n", key.at , value.at);
     if(key_ == NULL || value_ == NULL) {
         fprintf(stderr, "failed to allocate memory in insertStringEntry\n");
         exit(EXIT_FAILURE);
     } 
     object.key = key_;
     object.value = value_;
-    printf("the object entry count is %ld\n", object.count);
-    printf("%p\n", object.key);
+    dbg("the object entry count is %ld\n", object.count);
+    dbg("%p\n", object.key);
     object.key[object.count] = key; // key is just absorbed here and owned here from now on
     // this should be sourced from the string allocator backend once it is implemented
     object.value[object.count].discriminant = obj_t_string;
@@ -261,12 +262,15 @@ bool parseNumber(string json, size_t *pos, obj_t_value_t *result) {
 		if(!isdigit(json.at[*pos])) {
 			return false;
 		}
+		size_t frac_digits = 0;
 		while(json.at[*pos] && isdigit(json.at[*pos])) {
-			y += json.at[*pos] - '0';
-    		y *= 10;
+			y = y * 10 + (json.at[*pos] - '0');
+			frac_digits++;
     		(*pos)++;
 		}
-		while((y /= 10) > 1.0);		
+		for(size_t i = 0; i < frac_digits; i++) {
+			y /= 10;
+		}
   		y = x + y;
 		y = sign ? -y : y;
 
@@ -310,7 +314,15 @@ bool parseString(string json, size_t *pos, obj_t_value_t *result) {
 	(*pos)++;
 	size_t delta = 0;
 	size_t start = *pos;
-	while((*pos)++, delta++, json.at[*pos] && (json.at[*pos] != '"' || json.at[*pos - 1] == '\\'));
+	// track whether the current character is escaped by counting consecutive
+	// preceding backslashes, so "\\\"" (escaped backslash then literal quote)
+	// isn't mistaken for an escaped quote
+	bool escaped = false;
+	while(json.at[*pos] && (json.at[*pos] != '"' || escaped)) {
+		escaped = !escaped && json.at[*pos] == '\\';
+		(*pos)++;
+		delta++;
+	}
 	if(json.at[*pos] == '"') {
 		string substr = stringSliceFromString(json, start, start + delta);
 		*result = (obj_t_value_t) {
@@ -389,6 +401,7 @@ bool parseObject(string json, size_t *pos, obj_t_value_t *result) {
 		if(parseValue(json, pos, &val)) {
 			result->obj = insertObjectEntry(result->obj, key, val);
 		} else {
+			destroyString(key);
 			goto syntax_error;
 		}
 
@@ -470,7 +483,7 @@ object_t jsonToObject(string json_string) {
 string objectToJson(object_t object) {
     string ret;
     ret =  string("{");
-    printf("json: there are currently %ld entries\n", object.count);
+    dbg("json: there are currently %ld entries\n", object.count);
     for (size_t i = 0; i < object.count; i++) {
         ret = stringAppend(ret, "\"");
         ret = stringAppend(ret, object.key[i]);
@@ -750,7 +763,15 @@ obj_t_value_t objget(object_t obj, string key) {
     }; 
 }
 
-object_t objcopy(object_t obj);
+object_t objcopy(object_t obj) {
+    object_t ret = createEmptyObject();
+    for(size_t i = 0; i < obj.count; i++) {
+        string key_copy = stringFromString(obj.key[i]);
+        obj_t_value_t val_copy = obj_t_value_t_copy(obj.value[i]);
+        ret = insertObjectEntry(ret, key_copy, val_copy);
+    }
+    return ret;
+}
 
 obj_t_value_t obj_t_value_t_copy(obj_t_value_t val) {
     obj_t_value_t ret;
@@ -797,20 +818,83 @@ obj_t_value_t obj_t_value_t_copy(obj_t_value_t val) {
     return ret;
 }
 
-bool objremove(object_t obj, string key);
+bool objremove(object_t *obj, string key) {
+    size_t n = obj->count;
+    while(n --> 0) {
+        if(!stringeql(obj->key[n], key)) {
+            continue;
+        }
 
-int arraycmp(array_t arr1, array_t arr2);
-int arrayncmp(array_t arr1, array_t arr2, size_t n);
-bool arrayeql(array_t arr1, array_t arr2);
-bool arrayneql(array_t arr1, array_t arr2, size_t n);
-obj_t_value_t arrayget(array_t arr, size_t index);
-array_t arraycopy(array_t arr);
+        destroyString(obj->key[n]);
+        switch(obj->value[n].discriminant) {
+            case obj_t_string:
+                destroyString(obj->value[n].str);
+                break;
+            case obj_t_array:
+                destroyArray(obj->value[n].arr);
+                break;
+            case obj_t_obj:
+                destroyObject(obj->value[n].obj);
+                break;
+            default:
+                break;
+        }
 
-int valcmp(obj_t_value_t val1, obj_t_value_t val2);
-int valncmp(obj_t_value_t val1, obj_t_value_t val2, size_t n);
-bool valeql(obj_t_value_t val1, obj_t_value_t val2);
-bool valneql(obj_t_value_t val1, obj_t_value_t val2, size_t n);
+        for(size_t i = n; i + 1 < obj->count; i++) {
+            obj->key[i] = obj->key[i + 1];
+            obj->value[i] = obj->value[i + 1];
+        }
+        obj->count--;
+        return true;
+    }
+    return false;
+}
 
+int arraycmp(array_t arr1, array_t arr2) {
+    size_t count = arr1.count < arr2.count ? arr1.count : arr2.count;
+    return arrayncmp(arr1, arr2, count);
+}
+
+int arrayncmp(array_t arr1, array_t arr2, size_t n) {
+    size_t i = 0;
+    while(i < arr1.count && i < arr2.count && i < n) {
+        int res = valcmp(arr1.array[i], arr2.array[i]);
+        if(res != 0) {
+            return res;
+        }
+        i++;
+    }
+    return 0;
+}
+
+bool arrayeql(array_t arr1, array_t arr2) {
+    if(arr1.count != arr2.count) {
+        return false;
+    }
+    return arrayncmp(arr1, arr2, arr1.count) == 0;
+}
+
+bool arrayneql(array_t arr1, array_t arr2, size_t n) {
+    return arrayncmp(arr1, arr2, n) == 0;
+}
+
+obj_t_value_t arrayget(array_t arr, size_t index) {
+    if(index >= arr.count) {
+        return (obj_t_value_t) {
+            .discriminant = obj_t_null,
+        };
+    }
+    return arr.array[index];
+}
+
+array_t arraycopy(array_t arr) {
+    array_t ret = createEmptyArray();
+    for(size_t i = 0; i < arr.count; i++) {
+        obj_t_value_t elem_copy = obj_t_value_t_copy(arr.array[i]);
+        ret = insertIntoArray(ret, elem_copy);
+    }
+    return ret;
+}
 
 int valcmp(obj_t_value_t val1, obj_t_value_t val2) {
     // using === from js
@@ -820,21 +904,82 @@ int valcmp(obj_t_value_t val1, obj_t_value_t val2) {
 
     switch(val1.discriminant) {
         case obj_t_null:
-            break;
         case obj_t_false:
-            break;
         case obj_t_true:
-            break;
-        case obj_t_number:
-            break;
+            return 0;
+
+        case obj_t_number: {
+            long double a, b;
+            switch(val1.num.number_discriminant) {
+                case number_t_uint64_t: a = (long double) val1.num.as_uint64_t; break;
+                case number_t_int64_t:  a = (long double) val1.num.as_int64_t;  break;
+                case number_t_long_double: a = val1.num.as_long_double;         break;
+                case number_t_double:  a = (long double) val1.num.as_double;    break;
+                case number_t_float:   a = (long double) val1.num.as_float;     break;
+            }
+            switch(val2.num.number_discriminant) {
+                case number_t_uint64_t: b = (long double) val2.num.as_uint64_t; break;
+                case number_t_int64_t:  b = (long double) val2.num.as_int64_t;  break;
+                case number_t_long_double: b = val2.num.as_long_double;         break;
+                case number_t_double:  b = (long double) val2.num.as_double;    break;
+                case number_t_float:   b = (long double) val2.num.as_float;     break;
+            }
+            if(a < b) return -1;
+            if(a > b) return 1;
+            return 0;
+        }
+
         case obj_t_string:
-            break;
-        case obj_t_array:
-            break;
+            return stringcmp(val1.str, val2.str);
+
+        case obj_t_array: {
+            if(val1.arr.count != val2.arr.count) {
+                return val1.arr.count < val2.arr.count ? -1 : 1;
+            }
+            for(size_t i = 0; i < val1.arr.count; i++) {
+                int res = valcmp(val1.arr.array[i], val2.arr.array[i]);
+                if(res != 0) {
+                    return res;
+                }
+            }
+            return 0;
+        }
+
         case obj_t_obj:
-            break;
-        default:;
-        	break;
+            return objcmp(val1.obj, val2.obj);
+
+        default:
+        	return -1;
     }
-    return 0;
 } 
+
+int valncmp(obj_t_value_t val1, obj_t_value_t val2, size_t n) {
+    if(val1.discriminant != val2.discriminant) {
+        return valcmp(val1, val2);
+    }
+    if(val1.discriminant == obj_t_string) {
+        size_t len1 = stringlen(val1.str) < n ? stringlen(val1.str) : n;
+        size_t len2 = stringlen(val2.str) < n ? stringlen(val2.str) : n;
+        size_t len = len1 < len2 ? len1 : len2;
+        int res = memcmp(val1.str.at, val2.str.at, len);
+        if(res != 0) {
+            return res;
+        }
+        return len1 == len2 ? 0 : (len1 < len2 ? -1 : 1);
+    }
+    if(val1.discriminant == obj_t_array) {
+        return arrayncmp(val1.arr, val2.arr, n);
+    }
+    if(val1.discriminant == obj_t_obj) {
+        return objncmp(val1.obj, val2.obj, n);
+    }
+    return valcmp(val1, val2);
+}
+
+bool valeql(obj_t_value_t val1, obj_t_value_t val2) {
+    return valcmp(val1, val2) == 0;
+}
+
+bool valneql(obj_t_value_t val1, obj_t_value_t val2, size_t n) {
+    return valncmp(val1, val2, n) == 0;
+}

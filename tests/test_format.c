@@ -1,7 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
 #include "../include/chad.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static int passed = 0;
 static int failed = 0;
@@ -66,10 +68,69 @@ static void test_positional_insert(void) {
     destroyDictionary(d);
 }
 
+static void test_print_substring(void) {
+    printf("\n-- printSubstring --\n");
+
+    char text[] = "hello world";
+    substring_t substr = substring(text, text + 5);
+
+    FILE *tmp = tmpfile();
+    int saved_stdout = dup(fileno(stdout));
+    fflush(stdout);
+    dup2(fileno(tmp), fileno(stdout));
+
+    printSubstring(substr);
+
+    fflush(stdout);
+    dup2(saved_stdout, fileno(stdout));
+    close(saved_stdout);
+
+    rewind(tmp);
+    char buf[32] = {0};
+    fread(buf, 1, sizeof(buf) - 1, tmp);
+    fclose(tmp);
+
+    ASSERT_TRUE("printSubstring stops exactly at end, no over-read", strcmp(buf, "hello") == 0);
+}
+
+static void test_substring_trim_whitespace(void) {
+    printf("\n-- substringTrimWhitespace --\n");
+
+    char text1[] = "  hello  ";
+    substring_t trimmed1 = substringTrimWhitespace(substring(text1, text1 + strlen(text1)));
+    char *dup1 = strdupSubstring(trimmed1);
+    ASSERT_TRUE("trims leading and trailing whitespace", dup1 && strcmp(dup1, "hello") == 0);
+    free(dup1);
+
+    char text2[] = "hello";
+    substring_t trimmed2 = substringTrimWhitespace(substring(text2, text2 + strlen(text2)));
+    char *dup2 = strdupSubstring(trimmed2);
+    ASSERT_TRUE("no-whitespace input is unchanged", dup2 && strcmp(dup2, "hello") == 0);
+    free(dup2);
+
+    char text3[] = "   ";
+    substring_t trimmed3 = substringTrimWhitespace(substring(text3, text3 + strlen(text3)));
+    ASSERT_TRUE("all-whitespace input trims to zero-width", trimmed3.start == trimmed3.end);
+
+    char text4[] = "  x";
+    substring_t trimmed4 = substringTrimWhitespace(substring(text4, text4 + strlen(text4)));
+    char *dup4 = strdupSubstring(trimmed4);
+    ASSERT_TRUE("leading-only whitespace trims correctly", dup4 && strcmp(dup4, "x") == 0);
+    free(dup4);
+
+    char text5[] = "x  ";
+    substring_t trimmed5 = substringTrimWhitespace(substring(text5, text5 + strlen(text5)));
+    char *dup5 = strdupSubstring(trimmed5);
+    ASSERT_TRUE("trailing-only whitespace trims correctly", dup5 && strcmp(dup5, "x") == 0);
+    free(dup5);
+}
+
 int test_format(void) {
     test_format_basic();
     test_format_macro();
     test_positional_insert();
+    test_print_substring();
+    test_substring_trim_whitespace();
     
     printf("\n");
     if (failed == 0) {
