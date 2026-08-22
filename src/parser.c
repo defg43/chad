@@ -637,8 +637,15 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
     if(mod & modifier_array) {
         array_t arr = createEmptyArray();
 
+        size_t first_save_pos = is->index;
         option(obj_t_value_t) first = executeBody(is, rule_type, body, gram);
         if(!first.valid) {
+            // Restore position: a failed attempt may have partially
+            // consumed input before failing (e.g. matched an operator
+            // token but then failed on its required operand), and that
+            // partial consumption must not leak out of a zero-or-more
+            // ([]?) repetition that ultimately matched zero times.
+            is->index = first_save_pos;
             if(mod & modifier_optional) {
                 // []? : zero matches is fine, yield an empty array
                 obj_t_value_t ret = {
