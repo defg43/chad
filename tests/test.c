@@ -6,11 +6,13 @@ int test_parser();
 int test_str();
 int test_ion();
 int test_format();
+int test_cstl();
 
 int main() {
 	test_str();
 	test_ion();
 	test_format();
 	test_parser();
+	test_cstl();
   	return 0;
 }

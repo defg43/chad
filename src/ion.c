@@ -148,11 +148,14 @@ string arrayToJson(array_t array) {
 
     for (size_t i = 0; i < array.count; i++) {
         switch(array.array[i].discriminant) {
-            case obj_t_string:
+            case obj_t_string: {
+                string escaped = stringEscapeJson(array.array[i].str);
                 ret = stringAppend(ret, "\"");
-                ret = stringAppend(ret, array.array[i].str);
+                ret = stringAppend(ret, escaped);
                 ret = stringAppend(ret, "\"");
+                destroyString(escaped);
                 break;
+            }
             
             case obj_t_array: {
                 string temp = arrayToJson(array.array[i].arr);
@@ -325,9 +328,11 @@ bool parseString(string json, size_t *pos, obj_t_value_t *result) {
 	}
 	if(json.at[*pos] == '"') {
 		string substr = stringSliceFromString(json, start, start + delta);
+		string unescaped = stringUnescapeJson(substr);
+		destroyString(substr);
 		*result = (obj_t_value_t) {
 			.discriminant = obj_t_string,
-			.str = substr,
+			.str = unescaped,
 		};
 		(*pos)++; // skipping the last "
 		return true;
@@ -491,11 +496,14 @@ string objectToJson(object_t object) {
         ret = stringAppend(ret, " : ");
 
         switch(object.value[i].discriminant) {
-            case obj_t_string:
+            case obj_t_string: {
+                string escaped = stringEscapeJson(object.value[i].str);
                 ret = stringAppend(ret, "\"");
-                ret = stringAppend(ret, object.value[i].str);
+                ret = stringAppend(ret, escaped);
                 ret = stringAppend(ret, "\"");
+                destroyString(escaped);
             break;
+            }
             case obj_t_array:
                 string array_result = arrayToJson(object.value[i].arr);
                 ret = stringAppend(ret, array_result);
@@ -982,4 +990,128 @@ bool valeql(obj_t_value_t val1, obj_t_value_t val2) {
 
 bool valneql(obj_t_value_t val1, obj_t_value_t val2, size_t n) {
     return valncmp(val1, val2, n) == 0;
+}
+
+static void appendIndent(string *out, size_t indent_width, size_t depth) {
+    for(size_t i = 0; i < indent_width * depth; i++) {
+        *out = stringAppendChar(*out, ' ');
+    }
+}
+
+static string objectToJsonPrettyDepth(object_t object, size_t indent_width, size_t depth);
+static string arrayToJsonPrettyDepth(array_t array, size_t indent_width, size_t depth);
+
+static string valueToJsonPrettyDepth(obj_t_value_t value, size_t indent_width, size_t depth) {
+    switch(value.discriminant) {
+        case obj_t_string: {
+            string escaped = stringEscapeJson(value.str);
+            string ret = string("\"");
+            ret = stringAppend(ret, escaped);
+            ret = stringAppend(ret, "\"");
+            destroyString(escaped);
+            return ret;
+        }
+        case obj_t_array:
+            return arrayToJsonPrettyDepth(value.arr, indent_width, depth);
+        case obj_t_obj:
+            return objectToJsonPrettyDepth(value.obj, indent_width, depth);
+        case obj_t_null:
+            return string("null");
+        case obj_t_true:
+            return string("true");
+        case obj_t_false:
+            return string("false");
+        case obj_t_number:
+            return numberToString(value.num);
+        default:
+            return string("null");
+    }
+}
+
+static string objectToJsonPrettyDepth(object_t object, size_t indent_width, size_t depth) {
+    if(object.count == 0) {
+        return string("{}");
+    }
+
+    string ret = string("{\n");
+    for(size_t i = 0; i < object.count; i++) {
+        appendIndent(&ret, indent_width, depth + 1);
+        ret = stringAppend(ret, "\"");
+        ret = stringAppend(ret, object.key[i]);
+        ret = stringAppend(ret, "\": ");
+
+        string value_str = valueToJsonPrettyDepth(object.value[i], indent_width, depth + 1);
+        ret = stringAppend(ret, value_str);
+        destroyString(value_str);
+
+        if(i != object.count - 1) {
+            ret = stringAppend(ret, ",");
+        }
+        ret = stringAppend(ret, "\n");
+    }
+    appendIndent(&ret, indent_width, depth);
+    ret = stringAppend(ret, "}");
+    return ret;
+}
+
+static string arrayToJsonPrettyDepth(array_t array, size_t indent_width, size_t depth) {
+    if(array.count == 0) {
+        return string("[]");
+    }
+
+    string ret = string("[\n");
+    for(size_t i = 0; i < array.count; i++) {
+        appendIndent(&ret, indent_width, depth + 1);
+
+        string value_str = valueToJsonPrettyDepth(array.array[i], indent_width, depth + 1);
+        ret = stringAppend(ret, value_str);
+        destroyString(value_str);
+
+        if(i != array.count - 1) {
+            ret = stringAppend(ret, ",");
+        }
+        ret = stringAppend(ret, "\n");
+    }
+    appendIndent(&ret, indent_width, depth);
+    ret = stringAppend(ret, "]");
+    return ret;
+}
+
+string objectToJsonPretty(object_t object, size_t indent_width) {
+    return objectToJsonPrettyDepth(object, indent_width, 0);
+}
+
+string arrayToJsonPretty(array_t array, size_t indent_width) {
+    return arrayToJsonPrettyDepth(array, indent_width, 0);
+}
+
+obj_t_value_t objgetPath(object_t obj, string path) {
+    string delimiter = string(".");
+    dynarray(string) parts = stringSplit(path, delimiter);
+    destroyString(delimiter);
+
+    obj_t_value_t current = (obj_t_value_t) { .discriminant = obj_t_obj, .obj = obj };
+    bool found = true;
+
+    for(size_t i = 0; i < parts.count; i++) {
+        if(current.discriminant != obj_t_obj) {
+            found = false;
+            break;
+        }
+        if(!objcontains(current.obj, parts.at[i])) {
+            found = false;
+            break;
+        }
+        current = objget(current.obj, parts.at[i]);
+    }
+
+    for(size_t i = 0; i < parts.count; i++) {
+        destroyString(parts.at[i]);
+    }
+    destroy_dynarray(parts);
+
+    if(!found) {
+        return (obj_t_value_t) { .discriminant = obj_t_null };
+    }
+    return current;
 }
