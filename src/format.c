@@ -31,6 +31,19 @@ dictionary_t createDictionary(size_t count, char *data[count][2]) {
     return dictionary_to_return;
 }
 
+dictionary_t createDictionaryOwned(size_t count, char *data[count][2]) {
+    dictionary_t dictionary_to_return;
+    dictionary_to_return.key = malloc(count * sizeof(char *));
+    dictionary_to_return.value = malloc(count * sizeof(char *));
+    dictionary_to_return.entry_count = count;
+
+    for (size_t i = 0; i < count; i++) {
+        dictionary_to_return.key[i] = data[i][0];
+        dictionary_to_return.value[i] = data[i][1];
+    }
+    return dictionary_to_return;
+}
+
 void destroyDictionary(dictionary_t to_destroy) {
     for (size_t i = 0; i < to_destroy.entry_count; i++) {
         free(to_destroy.key[i]);
@@ -128,28 +141,26 @@ substring_t substringTrimWhitespace(substring_t substr) {
     }
 
     char *start = substr.start;
-    while (start && start < substr.end && isspace((unsigned char)*start)) {
+    while (start < substr.end && isspace((unsigned char)*start)) {
         start++;
     }
 
+    if (start >= substr.end) {
+        // entire input was whitespace
+        return (substring_t){ start, start };
+    }
+
     char *end = substr.end - 1;
-    while (end && end >= start && isspace((unsigned char)*end)) {
+    while (end > start && isspace((unsigned char)*end)) {
         end--;
     }
 
     dbg("substringTrimWhitespace: ");
-    printSubstring((substring_t){ start, end });
-
-	if(start < end) {
-		return (substring_t) {
-			.start = substr.start, 			
-			.end = substr.start, 
-		};
-	}
+    printSubstring((substring_t){ start, end + 1 });
 
     return (substring_t){
         .start = start, 
-        .end = end,
+        .end = end + 1, // .end is exclusive, so include the last non-whitespace char
     };
 }         
 
@@ -174,7 +185,7 @@ void printSubstring(substring_t substr) {
         return;
     } else {
         char *ptr = substr.start;
-        while(ptr != substr.end || *ptr == '\0') {
+        while(ptr != substr.end && *ptr != '\0') {
             putchar(*ptr);
             if(substr.end > substr.start) {
                 ptr++;
@@ -182,7 +193,6 @@ void printSubstring(substring_t substr) {
                 ptr--;
             }
         }
-        putchar(*ptr);
     }
 }
 
@@ -466,6 +476,273 @@ char *getIdentifier(char *in) {
 }
 
 // buf is going to be edited by 
+char *applyPadding(const char *value, char align, char fill, size_t width) {
+	size_t len = value ? strlen(value) : 0;
+	if(len >= width) {
+		return strdup(value ? value : "");
+	}
+
+	size_t pad = width - len;
+	char *result = malloc(width + 1);
+	if(result == NULL) {
+		return NULL;
+	}
+
+	switch(align) {
+		case '>': {
+			memset(result, fill, pad);
+			if(len) memcpy(result + pad, value, len);
+			break;
+		}
+		case '^': {
+			size_t left = pad / 2;
+			size_t right = pad - left;
+			memset(result, fill, left);
+			if(len) memcpy(result + left, value, len);
+			memset(result + left + len, fill, right);
+			break;
+		}
+		case '<':
+		default: {
+			if(len) memcpy(result, value, len);
+			memset(result + len, fill, pad);
+			break;
+		}
+	}
+	result[width] = '\0';
+	return result;
+}
+
+// parses a format spec of the form [[fill]align][width][.precision][type]
+// (type is one of d/x/X/o/f) and renders value accordingly, converting the
+// stringified value back to a number when a numeric type or precision is
+// requested. returned string is always malloc'd and must be freed by the caller.
+char *applyFormatSpec(const char *value, const char *spec, size_t spec_len) {
+	if(value == NULL) {
+		value = "";
+	}
+
+	char fill = ' ';
+	char align = '<';
+	size_t width = 0;
+	bool has_width = false;
+	long precision = -1;
+	char type = 0;
+	size_t i = 0;
+
+	if(i + 1 < spec_len && (spec[i + 1] == '<' || spec[i + 1] == '>' || spec[i + 1] == '^')) {
+		fill = spec[i];
+		align = spec[i + 1];
+		i += 2;
+	} else if(i < spec_len && (spec[i] == '<' || spec[i] == '>' || spec[i] == '^')) {
+		align = spec[i];
+		i++;
+	}
+
+	while(i < spec_len && spec[i] >= '0' && spec[i] <= '9') {
+		has_width = true;
+		width = width * 10 + (spec[i] - '0');
+		i++;
+	}
+
+	if(i < spec_len && spec[i] == '.') {
+		i++;
+		precision = 0;
+		while(i < spec_len && spec[i] >= '0' && spec[i] <= '9') {
+			precision = precision * 10 + (spec[i] - '0');
+			i++;
+		}
+	}
+
+	if(i < spec_len && strchr("dxXof", spec[i]) != NULL) {
+		type = spec[i];
+		i++;
+	}
+
+	char *converted = NULL;
+	const char *to_pad = value;
+
+	switch(type) {
+		case 'd': {
+			long long v = strtoll(value, NULL, 10);
+			asprintf(&converted, "%lld", v);
+			to_pad = converted;
+			break;
+		}
+		case 'x': {
+			long long v = strtoll(value, NULL, 10);
+			asprintf(&converted, "%llx", v);
+			to_pad = converted;
+			break;
+		}
+		case 'X': {
+			long long v = strtoll(value, NULL, 10);
+			asprintf(&converted, "%llX", v);
+			to_pad = converted;
+			break;
+		}
+		case 'o': {
+			long long v = strtoll(value, NULL, 10);
+			asprintf(&converted, "%llo", v);
+			to_pad = converted;
+			break;
+		}
+		case 'f': {
+			double v = strtod(value, NULL);
+			asprintf(&converted, "%.*f", (int)(precision >= 0 ? precision : 6), v);
+			to_pad = converted;
+			break;
+		}
+		default: {
+			if(precision >= 0) {
+				// no numeric type requested: precision truncates the string
+				size_t vlen = strlen(value);
+				size_t take = (size_t)precision < vlen ? (size_t)precision : vlen;
+				converted = malloc(take + 1);
+				memcpy(converted, value, take);
+				converted[take] = '\0';
+				to_pad = converted;
+			}
+			break;
+		}
+	}
+
+	char *result = has_width ? applyPadding(to_pad, align, fill, width) : strdup(to_pad);
+	free(converted);
+	return result;
+}
+
+// scans buf for named tags with a format spec, e.g. "{name:>10}", and renders
+// them using the raw dictionary value for "{name}" -- runs after positionalInsert
+// (which only touches bare/numbered braces) and before replaceSubstrings (which
+// only handles plain, spec-less named tags).
+char *applyNamedFormatSpecs(char *buf, dictionary_t dictionary) {
+	if(buf == NULL) {
+		return NULL;
+	}
+
+	size_t len = strlen(buf);
+	size_t index = 0;
+
+	while(index < len) {
+		if(buf[index] != '{' || buf[index + 1] == '{') {
+			index++;
+			continue;
+		}
+
+		size_t name_start = index + 1;
+		size_t i = name_start;
+		while(i < len && buf[i] != ':' && buf[i] != '}' && buf[i] != '{') {
+			i++;
+		}
+
+		if(i >= len || buf[i] != ':' || i == name_start) {
+			index++;
+			continue;
+		}
+
+		size_t name_end = i;
+		size_t spec_start = i + 1;
+		size_t j = spec_start;
+		while(j < len && buf[j] != '}') {
+			j++;
+		}
+
+		if(j >= len || buf[j] != '}') {
+			index++;
+			continue;
+		}
+
+		size_t name_len = name_end - name_start;
+		char *tag = malloc(name_len + 3);
+		tag[0] = '{';
+		memcpy(tag + 1, buf + name_start, name_len);
+		tag[name_len + 1] = '}';
+		tag[name_len + 2] = '\0';
+
+		char *raw_value = NULL;
+		for(size_t k = 0; k < dictionary.entry_count; k++) {
+			if(strcmp(dictionary.key[k], tag) == 0) {
+				raw_value = dictionary.value[k];
+				break;
+			}
+		}
+		free(tag);
+
+		if(raw_value == NULL) {
+			index = j + 1;
+			continue;
+		}
+
+		char *rendered = applyFormatSpec(raw_value, buf + spec_start, j - spec_start);
+		size_t val_len = rendered ? strlen(rendered) : 0;
+		size_t tag_len = j - index + 1;
+		size_t new_length = len + val_len - tag_len + 1;
+
+		if(val_len > tag_len) {
+			buf = realloc(buf, new_length);
+		}
+		memmove(buf + index + val_len, buf + j + 1, len - j);
+		if(val_len < tag_len) {
+			buf = realloc(buf, new_length);
+		}
+		len = new_length - 1;
+		if(val_len != 0) {
+			memcpy(buf + index, rendered, val_len);
+		}
+		buf[len] = '\0';
+		free(rendered);
+
+		index += val_len;
+	}
+
+	return buf;
+}
+
+// literal "{{" / "}}" are protected from tag parsing (positionalInsert,
+// applyNamedFormatSpecs, replaceSubstrings) by collapsing them to these
+// single-byte sentinels; restoreEscapedBraces() converts them back to '{'/'}'
+// as the final step of format()/printh().
+#define ESCAPED_OPEN_BRACE_SENTINEL '\x01'
+#define ESCAPED_CLOSE_BRACE_SENTINEL '\x02'
+
+char *protectEscapedBraces(char *buf) {
+	if(buf == NULL) {
+		return NULL;
+	}
+
+	size_t len = strlen(buf);
+	size_t index = 0;
+	while(index < len) {
+		if(buf[index] == '{' && buf[index + 1] == '{') {
+			buf[index] = ESCAPED_OPEN_BRACE_SENTINEL;
+			memmove(buf + index + 1, buf + index + 2, len - index - 2 + 1);
+			len--;
+		} else if(buf[index] == '}' && buf[index + 1] == '}') {
+			buf[index] = ESCAPED_CLOSE_BRACE_SENTINEL;
+			memmove(buf + index + 1, buf + index + 2, len - index - 2 + 1);
+			len--;
+		}
+		index++;
+	}
+	return buf;
+}
+
+char *restoreEscapedBraces(char *buf) {
+	if(buf == NULL) {
+		return NULL;
+	}
+
+	for(size_t i = 0; buf[i]; i++) {
+		if(buf[i] == ESCAPED_OPEN_BRACE_SENTINEL) {
+			buf[i] = '{';
+		} else if(buf[i] == ESCAPED_CLOSE_BRACE_SENTINEL) {
+			buf[i] = '}';
+		}
+	}
+	return buf;
+}
+
 char *positionalInsert(char *buf, dictionary_t dictionary) {
 	if(buf == NULL) {
 		return NULL;
@@ -489,22 +766,24 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 			if(buf[index + 1] == '}') {
 				dictionary_index++; // todo insert value from index
 				dbg("dictionary index: %ld\n", dictionary_index);
-				size_t val_len = strlen(dictionary.value[dictionary_index - 1]);
-				size_t new_length = len + val_len + 1; // null terminator :)
-				if(val_len > 2) {
-					buf = realloc(buf, new_length);
+				if(dictionary_index - 1 < dictionary.entry_count) {
+					size_t val_len = strlen(dictionary.value[dictionary_index - 1]);
+					size_t new_length = len + val_len + 1; // null terminator :)
+					if(val_len > 2) {
+						buf = realloc(buf, new_length);
+					}
+					// 								the + 1 copies the null terminator
+					memmove(buf + index + val_len, buf + index + 2, len - index - 2 + 1);
+					if(val_len < 2) {
+						buf = realloc(buf, new_length);
+					}
+					len += val_len - 2;
+					if(val_len != 0) {
+						strncpy(buf + index, dictionary.value[dictionary_index - 1], 
+							strlen(dictionary.value[dictionary_index - 1]));
+					} 
+					dbg("->%s\n", buf);
 				}
-				// 								the + 1 copies the null terminator
-				memmove(buf + index + val_len, buf + index + 2, len - index - 2 + 1);
-				if(val_len < 2) {
-					buf = realloc(buf, new_length);
-				}
-				len += val_len - 2;
-				if(val_len != 0) {
-					strncpy(buf + index, dictionary.value[dictionary_index - 1], 
-						strlen(dictionary.value[dictionary_index - 1]));
-				} 
-				dbg("->%s\n", buf);
 			} else {
 				dbg("entering number construction segment");
 				while(buf[run] == ' ') run++;
@@ -515,13 +794,32 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 				} 
 				while(buf[run] == ' ') run++;
 
+				// optional format spec: ':' [[fill]align][width][.precision][type]
+				bool has_spec = false;
+				size_t spec_start = 0;
+				size_t spec_end = 0;
+				if(buf[run] == ':') {
+					has_spec = true;
+					run++;
+					spec_start = run;
+					while(buf[run] && buf[run] != '}' && buf[run] != ' ') run++;
+					spec_end = run;
+				}
+				while(buf[run] == ' ') run++;
+
 				if(buf[run] == '}') {
 					// end found
 					dictionary_index = temp_number;
 					dbg("dictionary index: %ld\n", dictionary_index);
 					
 					if (dictionary_index < dictionary.entry_count) {
-						size_t val_len = dictionary.value[dictionary_index] ? strlen(dictionary.value[dictionary_index]) : 0;
+						char *rendered = NULL;
+						const char *value_to_use = dictionary.value[dictionary_index];
+						if(has_spec) {
+							rendered = applyFormatSpec(value_to_use, buf + spec_start, spec_end - spec_start);
+							value_to_use = rendered;
+						}
+						size_t val_len = value_to_use ? strlen(value_to_use) : 0;
 						size_t tag_len = run - index + 1;
 						size_t new_length = len + val_len - tag_len + 1;
 						
@@ -534,10 +832,11 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 						}
 						len = new_length - 1;
 						if (val_len != 0) {
-							memcpy(buf + index, dictionary.value[dictionary_index], val_len);
+							memcpy(buf + index, value_to_use, val_len);
 						}
 						buf[len] = '\0';
 						index += val_len - 1; 
+						free(rendered);
 					}
 				}
 			}
@@ -551,11 +850,15 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 }
                                                                                           
 char *format(char *buf, dictionary_t dictionary) {
-    char *output;
     char *temp;
-	temp = positionalInsert(buf, dictionary);
-	output = replaceSubstrings(temp, dictionary);
-    free(temp);
+	temp = protectEscapedBraces(buf);
+	temp = positionalInsert(temp, dictionary);
+	temp = applyNamedFormatSpecs(temp, dictionary);
+	char *output = replaceSubstrings(temp, dictionary);
+    if(output != temp) {
+        free(temp);
+    }
+    output = restoreEscapedBraces(output);
     return output;
 }
 

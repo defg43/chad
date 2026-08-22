@@ -116,6 +116,111 @@
 	array.capacity = 0;										\
 })
 
+// returns the index of the first element for which predicate(element) is
+// true, or -1 if no element matches
+#define dynarray_find(array, predicate) ({					\
+	long _hidden_found_index = -1;							\
+	for(size_t _hidden_i = 0; _hidden_i < (array).count; _hidden_i++) { \
+		if(predicate((array).at[_hidden_i])) {					\
+			_hidden_found_index = (long)_hidden_i;				\
+			break;												\
+		}														\
+	}															\
+	_hidden_found_index;										\
+})
+
+// returns the index of the last element for which predicate(element) is
+// true, or -1 if no element matches
+#define dynarray_find_last(array, predicate) ({			\
+	long _hidden_found_index = -1;							\
+	for(size_t _hidden_i = (array).count; _hidden_i --> 0;) { \
+		if(predicate((array).at[_hidden_i])) {					\
+			_hidden_found_index = (long)_hidden_i;				\
+			break;												\
+		}														\
+	}															\
+	_hidden_found_index;										\
+})
+
+// true if predicate(element) holds for at least one element
+#define dynarray_any(array, predicate) ({						\
+	bool _hidden_any_found = false;								\
+	for(size_t _hidden_i = 0; _hidden_i < (array).count; _hidden_i++) { \
+		if(predicate((array).at[_hidden_i])) {						\
+			_hidden_any_found = true;									\
+			break;														\
+		}																\
+	}																	\
+	_hidden_any_found;												\
+})
+
+// true if predicate(element) holds for every element (vacuously true for
+// an empty array)
+#define dynarray_all(array, predicate) ({						\
+	bool _hidden_all_matched = true;								\
+	for(size_t _hidden_i = 0; _hidden_i < (array).count; _hidden_i++) { \
+		if(!predicate((array).at[_hidden_i])) {						\
+			_hidden_all_matched = false;								\
+			break;														\
+		}																\
+	}																	\
+	_hidden_all_matched;												\
+})
+
+// reverses the array in place
+#define dynarray_reverse(array) ({								\
+	size_t _hidden_lo = 0;										\
+	size_t _hidden_hi = (array).count ? (array).count - 1 : 0;	\
+	while(_hidden_lo < _hidden_hi) {								\
+		typeof((array).at[0]) _hidden_tmp = (array).at[_hidden_lo]; \
+		(array).at[_hidden_lo] = (array).at[_hidden_hi];			\
+		(array).at[_hidden_hi] = _hidden_tmp;						\
+		_hidden_lo++;												\
+		_hidden_hi--;												\
+	}																\
+})
+
+// resets count to 0 but keeps the allocated buffer/capacity around for reuse.
+// does NOT free or destroy the elements themselves -- if the elements own
+// resources, destroy those first.
+#define dynarray_clear(array) ({								\
+	(array).count = 0;											\
+})
+
+// sorts the array in place using qsort. comparator has the usual qsort
+// signature: int comparator(const void *a, const void *b)
+#define dynarray_sort(array, comparator) ({					\
+	if((array).count > 0) {									\
+		qsort((array).at, (array).count, 						\
+			sizeof((array).at[0]), comparator);					\
+	}															\
+})
+
+// removes consecutive duplicate elements in place (like std::unique) --
+// call dynarray_sort first if duplicates aren't already adjacent.
+// equals has the signature: bool equals(typeof(array.at[0]) a, typeof(array.at[0]) b)
+#define dynarray_dedup(array, equals) ({						\
+	if((array).count > 1) {									\
+		size_t _hidden_write = 1;								\
+		for(size_t _hidden_read = 1; _hidden_read < (array).count; _hidden_read++) { \
+			if(!equals((array).at[_hidden_write - 1], (array).at[_hidden_read])) { \
+				(array).at[_hidden_write] = (array).at[_hidden_read];	\
+				_hidden_write++;										\
+			}														\
+		}															\
+		(array).count = _hidden_write;								\
+	}															\
+})
+
+// returns a new dynarray containing copies of elements in [start, end)
+#define dynarray_slice(array, start, end) ({					\
+	typeof(array) _hidden_slice_result = { .at = NULL, .count = 0, .capacity = 0 }; \
+	for(size_t _hidden_i = (start); _hidden_i < (end) && _hidden_i < (array).count; _hidden_i++) { \
+		dynarray_append(_hidden_slice_result, (array).at[_hidden_i]);	\
+	}															\
+	_hidden_slice_result;										\
+})
+
 #define stack(T) struct stack_##T {							\
 	T *at;													\
 	size_t count;											\

@@ -138,6 +138,17 @@ string objectToJson(object_t obj);
 string arrayToJson(array_t arr);
 string numberToString(number_t number);
 
+/** Pretty-print an object as JSON with newlines and indent_width spaces per level */
+string objectToJsonPretty(object_t obj, size_t indent_width);
+
+/** Pretty-print an array as JSON with newlines and indent_width spaces per level */
+string arrayToJsonPretty(array_t arr, size_t indent_width);
+
+/** Access a nested value via a dot-separated path (e.g. "user.profile.name").
+ *  Returns a null value (discriminant == obj_t_null) if any segment is
+ *  missing or if an intermediate segment is not an object. */
+obj_t_value_t objgetPath(object_t obj, string path);
+
 object_t jsonToObject(string json_string);
 
 bool parseKey(string json, size_t *pos, string *result);
@@ -156,7 +167,7 @@ bool objcontains(object_t obj, string key);
 obj_t_value_t objget(object_t obj, string key);
 obj_t_value_t obj_t_value_t_copy(obj_t_value_t val); 
 object_t objcopy(object_t obj);
-bool objremove(object_t obj, string key);
+bool objremove(object_t *obj, string key);
 
 int arraycmp(array_t arr1, array_t arr2);
 int arrayncmp(array_t arr1, array_t arr2, size_t n);

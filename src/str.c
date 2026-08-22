@@ -1593,6 +1593,7 @@ string stringBase64Encode(string str) {
     result->length = out_len;
     
     size_t i = 0, j = 0;
+    size_t out_pos = 0;
     unsigned char array_3[3];
     unsigned char array_4[4];
     
@@ -1604,9 +1605,8 @@ string stringBase64Encode(string str) {
             array_4[2] = ((array_3[1] & 0x0f) << 2) + ((array_3[2] & 0xc0) >> 6);
             array_4[3] = array_3[2] & 0x3f;
             
-            for(i = 0; i < 4; i++) {
-            	assert((j - 3 + i) >= 0);
-                result->data[j - 3 + i] = base64_chars[array_4[i]];
+            for(size_t k = 0; k < 4; k++) {
+                result->data[out_pos++] = base64_chars[array_4[k]];
             }
             i = 0;
         }
@@ -1622,11 +1622,11 @@ string stringBase64Encode(string str) {
         array_4[2] = ((array_3[1] & 0x0f) << 2) + ((array_3[2] & 0xc0) >> 6);
         
         for(size_t k = 0; k < i + 1; k++) {
-            result->data[j++] = base64_chars[array_4[k]];
+            result->data[out_pos++] = base64_chars[array_4[k]];
         }
         
         while(i++ < 3) {
-            result->data[j++] = '=';
+            result->data[out_pos++] = '=';
         }
     }
     
@@ -1782,6 +1782,250 @@ string stringToKebabCase(string str) {
         }
     }
     
+    string result = stringBuilderToString(&sb);
+    stringBuilderDestroy(&sb);
+    return result;
+}
+
+static int base64CharValue(char c) {
+    if(c >= 'A' && c <= 'Z') return c - 'A';
+    if(c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if(c >= '0' && c <= '9') return c - '0' + 52;
+    if(c == '+') return 62;
+    if(c == '/') return 63;
+    return -1;
+}
+
+string stringBase64Decode(string str) {
+    size_t in_len = stringlen(str);
+    if(in_len == 0 || in_len % 4 != 0) {
+        return string("");
+    }
+
+    size_t out_len = (in_len / 4) * 3;
+    if(str.at[in_len - 1] == '=') out_len--;
+    if(str.at[in_len - 2] == '=') out_len--;
+
+    stringHeader_t *result = malloc(sizeof(stringHeader_t) + out_len + 1);
+    if(!result) {
+        fprintf(stderr, "failed to allocate memory in stringBase64Decode\n");
+        exit(EXIT_FAILURE);
+    }
+    result->allocated_bytes = sizeof(stringHeader_t) + out_len + 1;
+    result->length = out_len;
+
+    size_t out_pos = 0;
+    for(size_t i = 0; i < in_len; i += 4) {
+        bool pad2 = str.at[i + 2] == '=';
+        bool pad3 = str.at[i + 3] == '=';
+
+        int v0 = base64CharValue(str.at[i]);
+        int v1 = base64CharValue(str.at[i + 1]);
+        int v2 = pad2 ? 0 : base64CharValue(str.at[i + 2]);
+        int v3 = pad3 ? 0 : base64CharValue(str.at[i + 3]);
+
+        if(v0 < 0 || v1 < 0 || (!pad2 && v2 < 0) || (!pad3 && v3 < 0)) {
+            free(result);
+            return string("");
+        }
+
+        uint32_t triple = ((uint32_t)v0 << 18) | ((uint32_t)v1 << 12) | ((uint32_t)v2 << 6) | (uint32_t)v3;
+
+        if(out_pos < out_len) result->data[out_pos++] = (char)((triple >> 16) & 0xFF);
+        if(out_pos < out_len) result->data[out_pos++] = (char)((triple >> 8) & 0xFF);
+        if(out_pos < out_len) result->data[out_pos++] = (char)(triple & 0xFF);
+    }
+
+    result->data[out_len] = '\0';
+    return (string) { .data = (dataSegmentOfString_t *)result->data };
+}
+
+static bool globMatchHelper(const char *s, const char *p) {
+    if(*p == '\0') {
+        return *s == '\0';
+    }
+
+    if(*p == '*') {
+        while(*p == '*') p++;
+        if(*p == '\0') {
+            return true;
+        }
+        while(*s) {
+            if(globMatchHelper(s, p)) return true;
+            s++;
+        }
+        return globMatchHelper(s, p);
+    }
+
+    if(*s == '\0') {
+        return false;
+    }
+
+    if(*p == '?') {
+        return globMatchHelper(s + 1, p + 1);
+    }
+
+    if(*p == '[') {
+        const char *class_pos = p + 1;
+        bool negate = false;
+        if(*class_pos == '!' || *class_pos == '^') {
+            negate = true;
+            class_pos++;
+        }
+
+        bool matched = false;
+        while(*class_pos != ']' && *class_pos != '\0') {
+            if(class_pos[1] == '-' && class_pos[2] != ']' && class_pos[2] != '\0') {
+                if(*s >= class_pos[0] && *s <= class_pos[2]) matched = true;
+                class_pos += 3;
+            } else {
+                if(*s == *class_pos) matched = true;
+                class_pos++;
+            }
+        }
+
+        if(*class_pos != ']') {
+            return false; // malformed character class, treat as no match
+        }
+
+        if(matched == negate) {
+            return false;
+        }
+        return globMatchHelper(s + 1, class_pos + 1);
+    }
+
+    if(*s != *p) {
+        return false;
+    }
+    return globMatchHelper(s + 1, p + 1);
+}
+
+bool stringMatchGlob(string str, string pattern) {
+    return globMatchHelper(str.at, pattern.at);
+}
+
+string stringStripCharsLeft(string str, const char *charsToStrip) {
+    if(charsToStrip == NULL || stringlen(str) == 0) {
+        return stringFromString(str);
+    }
+
+    size_t start = 0;
+    size_t len = stringlen(str);
+    while(start < len && strchr(charsToStrip, str.at[start]) != NULL) {
+        start++;
+    }
+
+    return stringSliceFromString(str, start, len);
+}
+
+string stringStripCharsRight(string str, const char *charsToStrip) {
+    if(charsToStrip == NULL || stringlen(str) == 0) {
+        return stringFromString(str);
+    }
+
+    size_t len = stringlen(str);
+    size_t end = len;
+    while(end > 0 && strchr(charsToStrip, str.at[end - 1]) != NULL) {
+        end--;
+    }
+
+    return stringSliceFromString(str, 0, end);
+}
+
+string stringStripChars(string str, const char *charsToStrip) {
+    if(charsToStrip == NULL || stringlen(str) == 0) {
+        return stringFromString(str);
+    }
+
+    size_t len = stringlen(str);
+    size_t start = 0;
+    while(start < len && strchr(charsToStrip, str.at[start]) != NULL) {
+        start++;
+    }
+
+    size_t end = len;
+    while(end > start && strchr(charsToStrip, str.at[end - 1]) != NULL) {
+        end--;
+    }
+
+    return stringSliceFromString(str, start, end);
+}
+
+string stringEscapeJson(string str) {
+    stringBuilder_t sb = stringBuilderCreate(stringlen(str) * 2);
+
+    for(size_t i = 0; i < stringlen(str); i++) {
+        unsigned char ch = (unsigned char)str.at[i];
+        switch(ch) {
+            case '"':  stringBuilderAppendCStr(&sb, "\\\""); break;
+            case '\\': stringBuilderAppendCStr(&sb, "\\\\"); break;
+            case '\n': stringBuilderAppendCStr(&sb, "\\n"); break;
+            case '\r': stringBuilderAppendCStr(&sb, "\\r"); break;
+            case '\t': stringBuilderAppendCStr(&sb, "\\t"); break;
+            case '\b': stringBuilderAppendCStr(&sb, "\\b"); break;
+            case '\f': stringBuilderAppendCStr(&sb, "\\f"); break;
+            default:
+                if(ch < 0x20) {
+                    char escape[8];
+                    snprintf(escape, sizeof(escape), "\\u%04x", ch);
+                    stringBuilderAppendCStr(&sb, escape);
+                } else {
+                    stringBuilderAppendChar(&sb, (char)ch);
+                }
+                break;
+        }
+    }
+
+    string result = stringBuilderToString(&sb);
+    stringBuilderDestroy(&sb);
+    return result;
+}
+
+string stringUnescapeJson(string str) {
+    stringBuilder_t sb = stringBuilderCreate(stringlen(str));
+
+    for(size_t i = 0; i < stringlen(str); i++) {
+        if(str.at[i] == '\\' && i + 1 < stringlen(str)) {
+            i++;
+            switch(str.at[i]) {
+                case '"':  stringBuilderAppendChar(&sb, '"'); break;
+                case '\\': stringBuilderAppendChar(&sb, '\\'); break;
+                case '/':  stringBuilderAppendChar(&sb, '/'); break;
+                case 'n':  stringBuilderAppendChar(&sb, '\n'); break;
+                case 'r':  stringBuilderAppendChar(&sb, '\r'); break;
+                case 't':  stringBuilderAppendChar(&sb, '\t'); break;
+                case 'b':  stringBuilderAppendChar(&sb, '\b'); break;
+                case 'f':  stringBuilderAppendChar(&sb, '\f'); break;
+                case 'u':
+                    if(i + 4 < stringlen(str)) {
+                        char hex[5] = {str.at[i+1], str.at[i+2], str.at[i+3], str.at[i+4], '\0'};
+                        char *endptr;
+                        long codepoint = strtol(hex, &endptr, 16);
+                        if(endptr == hex + 4) {
+                            if(codepoint < 0x80) {
+                                stringBuilderAppendChar(&sb, (char)codepoint);
+                            } else {
+                                string encoded = stringUtf8Encode((utf32_t)codepoint);
+                                stringBuilderAppend(&sb, encoded);
+                                destroyString(encoded);
+                            }
+                            i += 4;
+                        } else {
+                            stringBuilderAppendChar(&sb, str.at[i]);
+                        }
+                    } else {
+                        stringBuilderAppendChar(&sb, str.at[i]);
+                    }
+                    break;
+                default:
+                    stringBuilderAppendChar(&sb, str.at[i]);
+                    break;
+            }
+        } else {
+            stringBuilderAppendChar(&sb, str.at[i]);
+        }
+    }
+
     string result = stringBuilderToString(&sb);
     stringBuilderDestroy(&sb);
     return result;
