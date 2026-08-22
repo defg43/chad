@@ -26,11 +26,15 @@ static void test_ion_basic_object(void) {
     obj = insertStringEntry(obj, key, val);
     
     ASSERT_TRUE("object count is 1", obj.count == 1);
-    ASSERT_TRUE("contains key 'name'", objcontains(obj, string("name")));
+    string name_key = string("name");
+    ASSERT_TRUE("contains key 'name'", objcontains(obj, name_key));
     
-    obj_t_value_t retrieved = objget(obj, string("name"));
+    obj_t_value_t retrieved = objget(obj, name_key);
+    destroyString(name_key);
     ASSERT_TRUE("retrieved value is string", retrieved.discriminant == obj_t_string);
-    ASSERT_TRUE("retrieved value matches", stringeql(retrieved.str, string("chad")));
+    string chad_val = string("chad");
+    ASSERT_TRUE("retrieved value matches", stringeql(retrieved.str, chad_val));
+    destroyString(chad_val);
     
     string json = objectToJson(obj);
     ASSERT_TRUE("json matches", strstr(json.at, "\"name\" : \"chad\"") != NULL);
@@ -43,14 +47,17 @@ static void test_ion_nested_object(void) {
     printf("\n-- ION Nested Object --\n");
     
     object_t inner = createEmptyObject();
-    inner = insertStringEntry(inner, string("inner_key"), string("inner_val"));
+    string inner_key = string("inner_key");
+    string inner_val = string("inner_val");
+    inner = insertStringEntry(inner, inner_key, inner_val);
     
     object_t outer = createEmptyObject();
-    outer = insertSubobjectEntry(outer, string("outer_key"), inner);
+    string outer_key = string("outer_key");
+    outer = insertSubobjectEntry(outer, outer_key, inner);
     
     ASSERT_TRUE("outer count is 1", outer.count == 1);
     
-    obj_t_value_t retrieved = objget(outer, string("outer_key"));
+    obj_t_value_t retrieved = objget(outer, outer_key);
     ASSERT_TRUE("retrieved is subobject", retrieved.discriminant == obj_t_obj);
     ASSERT_TRUE("inner object count is 1", retrieved.obj.count == 1);
     
@@ -84,11 +91,17 @@ static void test_ion_json_parsing(void) {
     object_t obj = jsonToObject(json);
     
     ASSERT_TRUE("parsed object count is 2", obj.count == 2);
-    ASSERT_TRUE("contains 'key'", objcontains(obj, string("key")));
-    ASSERT_TRUE("contains 'num'", objcontains(obj, string("num")));
+    string key_key = string("key");
+    string num_key = string("num");
+    ASSERT_TRUE("contains 'key'", objcontains(obj, key_key));
+    ASSERT_TRUE("contains 'num'", objcontains(obj, num_key));
+    destroyString(num_key);
     
-    obj_t_value_t val = objget(obj, string("key"));
-    ASSERT_TRUE("key is 'val'", stringeql(val.str, string("val")));
+    obj_t_value_t val = objget(obj, key_key);
+    destroyString(key_key);
+    string val_val = string("val");
+    ASSERT_TRUE("key is 'val'", stringeql(val.str, val_val));
+    destroyString(val_val);
     
     destroyString(json);
     destroyObject(obj);
@@ -263,6 +276,112 @@ static void test_ion_parse_object_key_leak_on_bad_value(void) {
     destroyString(json);
 }
 
+static void test_ion_json_pretty_print(void) {
+    printf("\n-- ION objectToJsonPretty/arrayToJsonPretty --\n");
+
+    object_t obj = createEmptyObject();
+    obj = insertStringEntry(obj, string("name"), string("chad"));
+
+    array_t arr = createEmptyArray();
+    arr = insertIntoArray(arr, (obj_t_value_t){ .discriminant = obj_t_number,
+        .num = { .number_discriminant = number_t_int64_t, .as_int64_t = 1 } });
+    arr = insertIntoArray(arr, (obj_t_value_t){ .discriminant = obj_t_number,
+        .num = { .number_discriminant = number_t_int64_t, .as_int64_t = 2 } });
+    obj = insertArrayEntry(obj, string("nums"), arr);
+
+    string pretty = objectToJsonPretty(obj, 2);
+    ASSERT_TRUE("pretty print contains newline", strstr(pretty.at, "\n") != NULL);
+    ASSERT_TRUE("pretty print indents key with 2 spaces", strstr(pretty.at, "\n  \"name\"") != NULL);
+    ASSERT_TRUE("pretty print contains nested array open bracket", strstr(pretty.at, "[\n") != NULL);
+    ASSERT_TRUE("pretty print indents array elements with 4 spaces", strstr(pretty.at, "\n    1") != NULL);
+    ASSERT_TRUE("pretty print closes with matching brace", strstr(pretty.at, "\n}") != NULL);
+    destroyString(pretty);
+
+    object_t empty = createEmptyObject();
+    string empty_pretty = objectToJsonPretty(empty, 2);
+    ASSERT_TRUE("empty object pretty prints as {}", strcmp(empty_pretty.at, "{}") == 0);
+    destroyString(empty_pretty);
+    destroyObject(empty);
+
+    array_t empty_arr = createEmptyArray();
+    string empty_arr_pretty = arrayToJsonPretty(empty_arr, 2);
+    ASSERT_TRUE("empty array pretty prints as []", strcmp(empty_arr_pretty.at, "[]") == 0);
+    destroyString(empty_arr_pretty);
+    destroyArray(empty_arr);
+
+    destroyObject(obj);
+}
+
+static void test_ion_objget_path(void) {
+    printf("\n-- ION objgetPath --\n");
+
+    object_t profile = createEmptyObject();
+    profile = insertStringEntry(profile, string("name"), string("ada"));
+
+    object_t user = createEmptyObject();
+    user = insertSubobjectEntry(user, string("profile"), profile);
+
+    object_t root = createEmptyObject();
+    root = insertSubobjectEntry(root, string("user"), user);
+
+    string path1 = string("user.profile.name");
+    obj_t_value_t found = objgetPath(root, path1);
+    destroyString(path1);
+    ASSERT_TRUE("objgetPath finds deeply nested string", found.discriminant == obj_t_string);
+    string ada = string("ada");
+    ASSERT_TRUE("objgetPath returns correct value", stringeql(found.str, ada));
+    destroyString(ada);
+
+    string path2 = string("user.profile.missing");
+    obj_t_value_t missing_leaf = objgetPath(root, path2);
+    destroyString(path2);
+    ASSERT_TRUE("objgetPath returns null for missing leaf", missing_leaf.discriminant == obj_t_null);
+
+    string path3 = string("user.nope.name");
+    obj_t_value_t missing_mid = objgetPath(root, path3);
+    destroyString(path3);
+    ASSERT_TRUE("objgetPath returns null for missing intermediate segment", missing_mid.discriminant == obj_t_null);
+
+    string path4 = string("user.profile.name.extra");
+    obj_t_value_t through_leaf = objgetPath(root, path4);
+    destroyString(path4);
+    ASSERT_TRUE("objgetPath returns null when indexing through a non-object", through_leaf.discriminant == obj_t_null);
+
+    string path5 = string("user");
+    obj_t_value_t single = objgetPath(root, path5);
+    destroyString(path5);
+    ASSERT_TRUE("objgetPath with single segment returns top-level subobject", single.discriminant == obj_t_obj);
+
+    destroyObject(root);
+}
+
+static void test_ion_json_string_escaping(void) {
+    printf("\n-- ION JSON String Escaping --\n");
+
+    object_t obj = createEmptyObject();
+    string key = string("msg");
+    string value = string("line1\nline2\t\"quoted\"\\backslash");
+    obj = insertStringEntry(obj, key, value);
+
+    string json = objectToJson(obj);
+    ASSERT_TRUE("serialized JSON contains escaped newline", strstr(json.at, "\\n") != NULL);
+    ASSERT_TRUE("serialized JSON contains escaped quote", strstr(json.at, "\\\"") != NULL);
+    ASSERT_TRUE("serialized JSON contains escaped backslash", strstr(json.at, "\\\\") != NULL);
+
+    object_t roundtrip = jsonToObject(json);
+    string msg_key = string("msg");
+    obj_t_value_t roundtrip_val = objget(roundtrip, msg_key);
+    string expected = string("line1\nline2\t\"quoted\"\\backslash");
+    ASSERT_TRUE("round-tripped string matches original",
+        stringeql(roundtrip_val.str, expected));
+    destroyString(expected);
+    destroyString(msg_key);
+
+    destroyString(json);
+    destroyObject(obj);
+    destroyObject(roundtrip);
+}
+
 int test_ion(void) {
     test_ion_basic_object();
     test_ion_nested_object();
@@ -275,6 +394,9 @@ int test_ion(void) {
     test_ion_array_helpers();
     test_ion_parse_string_escaped_backslash();
     test_ion_parse_object_key_leak_on_bad_value();
+    test_ion_json_pretty_print();
+    test_ion_objget_path();
+    test_ion_json_string_escaping();
     
     printf("\n");
     if (failed == 0) {
