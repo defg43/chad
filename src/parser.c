@@ -639,6 +639,14 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
 
         option(obj_t_value_t) first = executeBody(is, rule_type, body, gram);
         if(!first.valid) {
+            if(mod & modifier_optional) {
+                // []? : zero matches is fine, yield an empty array
+                obj_t_value_t ret = {
+                    .discriminant = obj_t_array,
+                    .arr = arr
+                };
+                return (option(obj_t_value_t)) some(ret);
+            }
             destroyArray(arr);
             return (option(obj_t_value_t)) none;
         }

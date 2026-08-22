@@ -156,7 +156,7 @@ bool objcontains(object_t obj, string key);
 obj_t_value_t objget(object_t obj, string key);
 obj_t_value_t obj_t_value_t_copy(obj_t_value_t val); 
 object_t objcopy(object_t obj);
-bool objremove(object_t obj, string key);
+bool objremove(object_t *obj, string key);
 
 int arraycmp(array_t arr1, array_t arr2);
 int arrayncmp(array_t arr1, array_t arr2, size_t n);

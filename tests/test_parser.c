@@ -651,5 +651,39 @@ int test_parser() {
 	"entry -> a:'x' b:('0' '1' | '2')",
 	"x2");
 
+	// modifier edge cases: r13-r18 style rules, one-or-more / optional / both,
+	// including the zero-match edge case for each
+	runRuleVSInputTest(
+	"entry -> a:digit[];"
+	"digit -> '0' | '1' | '2'",
+	"012");
+
+	runRuleVSInputTest(
+	"entry -> a:digit[];"
+	"digit -> '0' | '1' | '2'",
+	"");
+
+	runRuleVSInputTest(
+	"entry -> a:digit?;"
+	"digit -> '0' | '1' | '2'",
+	"1");
+
+	runRuleVSInputTest(
+	"entry -> a:digit?;"
+	"digit -> '0' | '1' | '2'",
+	"");
+
+	// []? ("zero or more"): should succeed with an empty array when there
+	// are zero matches, same as [] does when there is at least one match
+	runRuleVSInputTest(
+	"entry -> a:digit[]?;"
+	"digit -> '0' | '1' | '2'",
+	"012");
+
+	runRuleVSInputTest(
+	"entry -> a:digit[]?;"
+	"digit -> '0' | '1' | '2'",
+	"");
+
     return 0;
 }
