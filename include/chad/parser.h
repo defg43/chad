@@ -29,9 +29,32 @@ rule -> t1:token '(' t2:token ')'
 the modifiers are [] which searches for at least one or more occurences, ? 
 which looks for one or none occurences
 
+it is also possible to write rules inline by writing key:(definition), the key is also optional like with other rules
+
 in addition there are alternatives that can be used between elements where only one alternative 
 needs to succeed. The first matched alternative has priority; matching will stop after the first
 successfull match
+
+alternatives (|) has low binding strength, so that a b c | d e f is equivalent to (a b c) | (d e f)
+*//* examples:
+r1 -> 'a'
+r2 -> a:'a'
+r3 -> a:r2
+r4 -> a:r2 b:r3
+r5 -> r4
+r6 -> r4 r5
+r7 -> r4 | r5
+r8 -> r4 r5 | r6 r7
+r9 -> a:r4 b:r5 c:r6 d:r7
+r10 -> r4 (r5 | r6) r7
+r11 -> a:r4 b:(r5 | r6 r7 'a')
+r12 -> a:r4 b:(a:r5 | b:'abc' c:'def') '1234' c:'1234'
+r13 -> a:r1[]
+r14 -> a:r1?
+r15 -> a:r1[]?
+r16 -> 'a'[]
+r17 -> 'a'?
+r18 -> 'a'[]?
 */
 
 #include "cstl.h"
@@ -53,6 +76,17 @@ typedef	enum {
 } type_modifier_t;
 
 typedef struct grammar_entry grammar_entry_t;
+typedef struct rule_node rule_node_t;
+typedef dynarray(rule_node_t) rule_node_seq_t;
+
+// the body of an inline anonymous rule key:(definition); shares the same
+// shape as grammar_entry_t (a rule_type_t plus a sequence of rule_node_t)
+// since an inline rule is executed exactly like a named one, just without
+// a name.
+typedef struct {
+	rule_type_t rule_type;
+	rule_node_seq_t element;
+} inline_rule_t;
 
 typedef struct {
 	type_modifier_t type_mod;
@@ -60,6 +94,7 @@ typedef struct {
 	enum {
 		is_literal,
 		is_rule,
+		is_inline,
 	} literal_or_rule;
 	union {
 		struct {
@@ -67,24 +102,29 @@ typedef struct {
 			grammar_entry_t *ge;
 		};
 		string literal;
+		inline_rule_t inl;
 	};	
 } rule_t;
 
-typedef struct {
+// one "a b c" run of rule_t, used as a single alternative branch when `|`
+// (low binding) groups multiple elements together
+typedef dynarray(rule_t) rule_sequence_t;
+
+struct rule_node {
 	enum {
 		is_regular,
 		has_alternative,
 	} alternative_or_regular;
 	union {
-		dynarray(rule_t) alternative;
+		dynarray(rule_sequence_t) alternative; // list of alternative sequences
 		rule_t rule;
 	};
-} rule_node_t;
+};
 
 struct grammar_entry {
 	string name;
 	rule_type_t rule_type;
-	dynarray(rule_node_t) element;
+	rule_node_seq_t element;
 };
 
 typedef struct {
@@ -118,7 +158,7 @@ typedef struct {
 				_________________________
 				|						|
 				|						|
-		  ----	|  rule_t alternative[] |
+		  ----	| rule_sequence_t alternative[] |
 		  |		|			/			|
 		  |---	|	   rule_t rule 		|
 		  |		|						|
@@ -146,6 +186,11 @@ typedef struct {
 				| _______literal_______ |
 				| |					  | |
 				| |   string literal  | |
+				| |___________________| |
+				| 			/			|
+				| ______inline_rule____ |
+				| |					  | |
+				| |  inline_rule_t inl| |
 				| |___________________| |
 				|_______________________|
 
@@ -176,7 +221,7 @@ bool parseSeperator(iterstring_t *rule);
 bool isFollowedByAlternative(iterstring_t *rule);
 
 option(rule_t) compileRule(iterstring_t *rule);
-option(rule_node_t) compileRuleNode(iterstring_t *rule);
+option(rule_node_seq_t) compileRuleBody(iterstring_t *rule);
 option(grammar_entry_t) compileGrammarEntry(string rule_definition);
 
 object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string start_rule);

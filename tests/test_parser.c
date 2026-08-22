@@ -22,6 +22,8 @@ void printTypeModifier(type_modifier_t mod) {
     }
 }
 
+void printRuleNode_t(rule_node_t node, int level);
+
 void printRule_t(rule_t rule) {
     if(rule.storage_key.valid) {
         printf("%s:", rule.storage_key.value.at);
@@ -29,8 +31,14 @@ void printRule_t(rule_t rule) {
     
     if(rule.literal_or_rule == is_literal) {
         printf("'%s'", rule.literal.at);
-    } else {
+    } else if(rule.literal_or_rule == is_rule) {
         printf("%s", rule.rule_name.at);
+    } else {
+        printf("(\n");
+        for(size_t i = 0; i < rule.inl.element.count; i++) {
+            printRuleNode_t(rule.inl.element.at[i], 1);
+        }
+        printf(")");
     }
     
     printTypeModifier(rule.type_mod);
@@ -45,8 +53,14 @@ void printRuleNode_t(rule_node_t node, int level) {
     } else {
         printf("alternatives:\n");
         for(size_t i = 0; i < node.alternative.count; i++) {
+            rule_sequence_t seq = node.alternative.at[i];
             printIndent(level + 1);
-            printRule_t(node.alternative.at[i]);
+            for(size_t j = 0; j < seq.count; j++) {
+                printRule_t(seq.at[j]);
+                if(j < seq.count - 1) {
+                    printf(" ");
+                }
+            }
             if(i < node.alternative.count - 1) {
                 printf(" |");
             }
@@ -613,8 +627,63 @@ int test_parser() {
 	"digit -> '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'", 
 	"1234");
 
+	// low-binding `|`: each alternative is a *sequence* of keyed elements,
+	// contributed as-is into the enclosing object
+	runRuleVSInputTest(
+	"entry -> a:'x' b:'y' | c:'z'",
+	"xy");
 
+	runRuleVSInputTest(
+	"entry -> a:'x' b:'y' | c:'z'",
+	"z");
 
-	
+	// inline anonymous rule: key:(definition)
+	runRuleVSInputTest(
+	"entry -> b:('0' | '1')",
+	"1");
+
+	// inline rule body itself containing a low-binding `|` of sequences
+	runRuleVSInputTest(
+	"entry -> a:'x' b:('0' '1' | '2')",
+	"x01");
+
+	runRuleVSInputTest(
+	"entry -> a:'x' b:('0' '1' | '2')",
+	"x2");
+
+	// modifier edge cases: r13-r18 style rules, one-or-more / optional / both,
+	// including the zero-match edge case for each
+	runRuleVSInputTest(
+	"entry -> a:digit[];"
+	"digit -> '0' | '1' | '2'",
+	"012");
+
+	runRuleVSInputTest(
+	"entry -> a:digit[];"
+	"digit -> '0' | '1' | '2'",
+	"");
+
+	runRuleVSInputTest(
+	"entry -> a:digit?;"
+	"digit -> '0' | '1' | '2'",
+	"1");
+
+	runRuleVSInputTest(
+	"entry -> a:digit?;"
+	"digit -> '0' | '1' | '2'",
+	"");
+
+	// []? ("zero or more"): should succeed with an empty array when there
+	// are zero matches, same as [] does when there is at least one match
+	runRuleVSInputTest(
+	"entry -> a:digit[]?;"
+	"digit -> '0' | '1' | '2'",
+	"012");
+
+	runRuleVSInputTest(
+	"entry -> a:digit[]?;"
+	"digit -> '0' | '1' | '2'",
+	"");
+
     return 0;
 }

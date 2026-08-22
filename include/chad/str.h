@@ -254,12 +254,31 @@ string stringRemoveDuplicates(string str);
 string stringIntersect(string str1, string str2);
 string stringEscapeC(string str);
 string stringUnescapeC(string str);
+
+/** Escape a string for embedding in a JSON string literal (quotes, backslashes,
+ *  control characters become \\uXXXX) */
+string stringEscapeJson(string str);
+
+/** Reverse stringEscapeJson: decode JSON escape sequences (\\n, \\t, \\uXXXX, etc.) */
+string stringUnescapeJson(string str);
+
 string stringBase64Encode(string str);
-string stringBase64Decode(string str); // currently not implemented
+string stringBase64Decode(string str);
 bool stringMatchWildcard(string str, string pattern);
 bool stringMatchGlob(string str, string pattern);
 size_t stringLevenshteinDistance(string str1, string str2);
+string stringToTitleCase(string str);
+string stringToCamelCase(string str);
 string stringToSnakeCase(string str);
 string stringToKebabCase(string str);
+
+/** Remove leading occurrences of any character in charsToStrip (allocates new string) */
+string stringStripCharsLeft(string str, const char *charsToStrip);
+
+/** Remove trailing occurrences of any character in charsToStrip (allocates new string) */
+string stringStripCharsRight(string str, const char *charsToStrip);
+
+/** Remove leading and trailing occurrences of any character in charsToStrip (allocates new string) */
+string stringStripChars(string str, const char *charsToStrip);
 
 #endif // STR_H

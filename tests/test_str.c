@@ -374,6 +374,154 @@ static void test_utf8(void) {
     destroyString(u);
 }
 
+static void test_base64(void) {
+    printf("\n-- Base64 --\n");
+
+    string s = string("hello world");
+    string encoded = stringBase64Encode(s);
+    ASSERT_TRUE("base64 encode", str_ok(encoded, "aGVsbG8gd29ybGQ="));
+
+    string decoded = stringBase64Decode(encoded);
+    ASSERT_TRUE("base64 decode round trip", str_ok(decoded, "hello world"));
+    destroyString(decoded);
+    destroyString(encoded);
+    destroyString(s);
+
+    string s2 = string("a");
+    string encoded2 = stringBase64Encode(s2);
+    ASSERT_TRUE("base64 encode 1 byte", str_ok(encoded2, "YQ=="));
+    string decoded2 = stringBase64Decode(encoded2);
+    ASSERT_TRUE("base64 decode 1 byte", str_ok(decoded2, "a"));
+    destroyString(decoded2);
+    destroyString(encoded2);
+    destroyString(s2);
+
+    string s3 = string("ab");
+    string encoded3 = stringBase64Encode(s3);
+    ASSERT_TRUE("base64 encode 2 bytes", str_ok(encoded3, "YWI="));
+    string decoded3 = stringBase64Decode(encoded3);
+    ASSERT_TRUE("base64 decode 2 bytes", str_ok(decoded3, "ab"));
+    destroyString(decoded3);
+    destroyString(encoded3);
+    destroyString(s3);
+
+    string empty = string("");
+    string bad = stringBase64Decode(empty);
+    ASSERT_TRUE("base64 decode empty input yields empty", str_ok(bad, ""));
+    destroyString(bad);
+    destroyString(empty);
+
+    string malformed = string("not base64!");
+    string bad2 = stringBase64Decode(malformed);
+    ASSERT_TRUE("base64 decode malformed input yields empty", str_ok(bad2, ""));
+    destroyString(bad2);
+    destroyString(malformed);
+}
+
+static bool globMatchCStr(const char *s, const char *p) {
+    string str = string((char *)s);
+    string pattern = string((char *)p);
+    bool result = stringMatchGlob(str, pattern);
+    destroyString(str);
+    destroyString(pattern);
+    return result;
+}
+
+static void test_glob(void) {
+    printf("\n-- Glob Matching --\n");
+
+    ASSERT_TRUE("glob exact match", globMatchCStr("hello", "hello"));
+    ASSERT_TRUE("glob star matches all", globMatchCStr("hello", "*"));
+    ASSERT_TRUE("glob star prefix", globMatchCStr("hello.c", "*.c"));
+    ASSERT_TRUE("glob star suffix mismatch", !globMatchCStr("hello.h", "*.c"));
+    ASSERT_TRUE("glob question mark", globMatchCStr("cat", "c?t"));
+    ASSERT_TRUE("glob question mark mismatch", !globMatchCStr("ct", "c?t"));
+    ASSERT_TRUE("glob char class", globMatchCStr("cat", "[bc]at"));
+    ASSERT_TRUE("glob char class mismatch", !globMatchCStr("hat", "[bc]at"));
+    ASSERT_TRUE("glob char range", globMatchCStr("c3t", "c[0-9]t"));
+    ASSERT_TRUE("glob negated char class", globMatchCStr("hat", "[!bc]at"));
+    ASSERT_TRUE("glob negated char class mismatch", !globMatchCStr("bat", "[!bc]at"));
+    ASSERT_TRUE("glob multiple stars", globMatchCStr("abcdef", "a*c*f"));
+    ASSERT_TRUE("glob empty pattern needs empty string", globMatchCStr("", ""));
+    ASSERT_TRUE("glob star matches empty", globMatchCStr("", "*"));
+}
+
+static void test_strip_chars(void) {
+    printf("\n-- Strip Chars --\n");
+
+    string s = string("###hello###");
+    string stripped = stringStripChars(s, "#");
+    ASSERT_TRUE("strip chars both sides", str_ok(stripped, "hello"));
+    destroyString(stripped);
+
+    string left = stringStripCharsLeft(s, "#");
+    ASSERT_TRUE("strip chars left only", str_ok(left, "hello###"));
+    destroyString(left);
+
+    string right = stringStripCharsRight(s, "#");
+    ASSERT_TRUE("strip chars right only", str_ok(right, "###hello"));
+    destroyString(right);
+    destroyString(s);
+
+    string s2 = string("  ,,hi,,  ");
+    string stripped2 = stringStripChars(s2, " ,");
+    ASSERT_TRUE("strip chars multiple char set", str_ok(stripped2, "hi"));
+    destroyString(stripped2);
+    destroyString(s2);
+
+    string plain = string("hello");
+    string stripped3 = stringStripChars(plain, "#");
+    ASSERT_TRUE("strip chars no matching chars leaves string unchanged", str_ok(stripped3, "hello"));
+    destroyString(stripped3);
+    destroyString(plain);
+
+    string allStrip = string("###");
+    string stripped4 = stringStripChars(allStrip, "#");
+    ASSERT_TRUE("strip chars entirely stripped yields empty", str_ok(stripped4, ""));
+    destroyString(stripped4);
+    destroyString(allStrip);
+}
+
+static void test_json_escape(void) {
+    printf("\n-- JSON Escape/Unescape --\n");
+
+    string s1 = string("hello world");
+    string e1 = stringEscapeJson(s1);
+    ASSERT_TRUE("escape leaves plain text untouched", str_ok(e1, "hello world"));
+    destroyString(e1);
+    destroyString(s1);
+
+    string s2 = string("a\"b\\c");
+    string e2 = stringEscapeJson(s2);
+    ASSERT_TRUE("escape handles quotes and backslashes", str_ok(e2, "a\\\"b\\\\c"));
+    string u2 = stringUnescapeJson(e2);
+    ASSERT_TRUE("unescape reverses quote/backslash escaping", str_ok(u2, "a\"b\\c"));
+    destroyString(u2);
+    destroyString(e2);
+    destroyString(s2);
+
+    string s3 = string("line1\nline2\ttab");
+    string e3 = stringEscapeJson(s3);
+    ASSERT_TRUE("escape handles newline and tab", str_ok(e3, "line1\\nline2\\ttab"));
+    string u3 = stringUnescapeJson(e3);
+    ASSERT_TRUE("unescape reverses newline/tab escaping", str_ok(u3, "line1\nline2\ttab"));
+    destroyString(u3);
+    destroyString(e3);
+    destroyString(s3);
+
+    string s4 = string("");
+    string e4 = stringEscapeJson(s4);
+    ASSERT_TRUE("escape of empty string is empty", str_ok(e4, ""));
+    destroyString(e4);
+    destroyString(s4);
+
+    string e5 = string("caf\\u00e9");
+    string u5 = stringUnescapeJson(e5);
+    ASSERT_TRUE("unescape decodes \\u sequences below 0x80", str_ok(u5, "caf\xc3\xa9"));
+    destroyString(u5);
+    destroyString(e5);
+}
+
 int test_str(void) {
     test_from_charptr();
     test_from_string();
@@ -391,6 +539,10 @@ int test_str(void) {
     test_join();
     test_format();
     test_utf8();
+    test_base64();
+    test_glob();
+    test_strip_chars();
+    test_json_escape();
 
     printf("\n");
     if (failed == 0) {

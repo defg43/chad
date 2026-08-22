@@ -55,6 +55,26 @@ void printSubstring(substring_t substr);
 int getIdentifierIndex(char *input, size_t index);
 char *getIdentifier(char *input);
 char *positionalInsert(char *buf, dictionary_t dictionary);
+// collapses literal "{{" / "}}" to internal single-byte sentinels so later
+// tag-parsing passes (positionalInsert, applyNamedFormatSpecs, replaceSubstrings)
+// don't treat them as tags; pair with restoreEscapedBraces() to undo. buf may
+// be realloc'd; use the returned pointer.
+char *protectEscapedBraces(char *buf);
+// converts the sentinels written by protectEscapedBraces() back to '{'/'}'.
+char *restoreEscapedBraces(char *buf);
+// pads/truncates value to width using fill on the padding side(s):
+// align is one of '<' (left, default), '>' (right), '^' (center).
+// returned string is always malloc'd and must be freed by the caller.
+char *applyPadding(const char *value, char align, char fill, size_t width);
+// parses a format spec of the form [[fill]align][width][.precision][type]
+// (type is one of d/x/X/o/f) and renders value accordingly; converts the
+// stringified value back to a number when a numeric type/precision is given.
+// returned string is always malloc'd and must be freed by the caller.
+char *applyFormatSpec(const char *value, const char *spec, size_t spec_len);
+// applies format specs on named tags (e.g. "{name:>10}") in buf, using the
+// raw value looked up under the "{name}" key in dictionary. buf may be
+// realloc'd; use the returned pointer.
+char *applyNamedFormatSpecs(char *buf, dictionary_t dictionary);
 int vasprintf(char **str, const char *fmt, va_list args);
 int asprintf (char **str, const char *fmt, ...);
 
@@ -64,6 +84,10 @@ dynarray(string) tokenizePairwiseString(char_ptr_conv_t input,
 
 // dictionary functions 
 dictionary_t createDictionary(size_t count, char *data[count][2]);
+// like createDictionary, but takes ownership of the key/value pointers directly
+// instead of strdup'ing them -- use only when every key/value pointer in data
+// is already a distinct heap allocation (e.g. from getIdentifier/asprintf)
+dictionary_t createDictionaryOwned(size_t count, char *data[count][2]);
 void destroyDictionary(dictionary_t to_destroy);
 dictionary_t convertKeysToTags(dictionary_t dictionary);
 void printDictionary(dictionary_t dictionary);
@@ -123,6 +147,15 @@ void printDictionary(dictionary_t dictionary);
     createDictionary(size, dictionary);             					\
 })
 
+// same as dict(), but for entries whose key/value strings are already
+// individually malloc'd (e.g. built by _createKeyValuePairs) -- avoids the
+// double-allocation + leak that dict()/createDictionary's strdup would cause
+#define ownedDict(...) ({                                				\
+    char *dictionary[][2] = __VA_ARGS__;            					\
+    size_t size = (sizeof(dictionary) / sizeof(dictionary[0]));             					\
+    createDictionaryOwned(size, dictionary);             				\
+})
+
 #define dictDeepCopy(...) ({                        					\
     char *dictionary[][2] = __VA_ARGS__;            					\
     size_t size = (sizeof(dictionary) / sizeof(dictionary[0]));             					\
@@ -157,7 +190,7 @@ void printDictionary(dictionary_t dictionary);
         _Pragma("GCC diagnostic push"); 					            \
         PLEASE_GCC_AND_CLANG_STOP_FIGTHING_OVER_PRAGMAS                 \
         auto tmp = convertKeysToTags(                                   \
-	        dict({ MAP(_createKeyValuePairs, __VA_ARGS__) })); 			\
+	        ownedDict({ MAP(_createKeyValuePairs, __VA_ARGS__) })); 			\
         char *ret = format(strdup(fmt), tmp);									\
         _Pragma("GCC diagnostic pop");			    			        \
         destroyDictionary(tmp);											\
@@ -169,7 +202,7 @@ void printDictionary(dictionary_t dictionary);
         _Pragma("GCC diagnostic push"); 					            \
         PLEASE_GCC_AND_CLANG_STOP_FIGTHING_OVER_PRAGMAS                 \
         auto tmp = convertKeysToTags(									\
-        	dict({ __VA_OPT__(MAP(_createKeyValuePairs, __VA_ARGS__)) }));			\
+        	ownedDict({ __VA_OPT__(MAP(_createKeyValuePairs, __VA_ARGS__)) }));			\
         int ret = printh(fmt, tmp); 									\
         _Pragma("GCC diagnostic pop");			    			        \
         destroyDictionary(tmp);											\
