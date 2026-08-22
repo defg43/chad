@@ -789,7 +789,6 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
         destroyString(local_str);
         destroyObject(local_obj);
         is->index = save_pos;
-        iterstringReset(is);
     }
 
     return false;
