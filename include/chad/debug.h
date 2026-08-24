@@ -13,6 +13,12 @@
 #define lengthof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
+// glibc's malloc_usable_size isn't available on Windows; MinGW/MSVC expose
+// the same information through _msize instead.
+#if defined(_WIN32)
+#define malloc_usable_size(ptr) _msize(ptr)
+#endif
+
 #ifdef __KERNEL__
 #	include<linux/printk.h>
 #	define INTERNAL_PRINT printk

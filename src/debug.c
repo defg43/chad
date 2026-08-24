@@ -1,9 +1,3 @@
-#ifdef __GNUC__
-#include <execinfo.h>
-#define __USE_GNU
-#include <dlfcn.h>
-#include <stddef.h>
-
 #ifdef __KERNEL__
 #	include<linux/printk.h>
 #	define INTERNAL_PRINT printk
@@ -14,6 +8,14 @@
 #	define STD_PREFIX 
 #	define CONT_PREFIX
 #endif // __KERNEL__
+
+// execinfo.h/dlfcn.h are glibc-specific, not just __GNUC__-specific -
+// MinGW also defines __GNUC__ but doesn't have them.
+#if defined(__GNUC__) && defined(__linux__)
+#include <execinfo.h>
+#define __USE_GNU
+#include <dlfcn.h>
+#include <stddef.h>
 
 const char *getCaller(void) {
     void *callstack[4];
@@ -33,11 +35,17 @@ const char *getCaller(void) {
 const char *getCaller(void) {
 	return "<unimplemented>";
 }
-#endif // __GNUC__
+#endif // __GNUC__ && __linux__
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
+
+// glibc's malloc_usable_size isn't available on Windows; MinGW/MSVC expose
+// the same information through _msize instead.
+#if defined(_WIN32) && !defined(malloc_usable_size)
+#define malloc_usable_size(ptr) _msize(ptr)
+#endif
 
 const char *escape_sequence[256] = {
 	['\a'] = "\\a",
