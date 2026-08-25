@@ -862,7 +862,7 @@ char *format(char *buf, dictionary_t dictionary) {
     return output;
 }
 
-int printh(char *fmt, __attribute_maybe_unused__ dictionary_t dictionary) {
+int printh(char *fmt, [[maybe_unused]] dictionary_t dictionary) {
 	char *output = format(strdup(fmt), dictionary);
     int output_length = strlen(output);
 	fputs(output, stdout);
