@@ -88,13 +88,37 @@ typedef struct {
 	rule_node_seq_t element;
 } inline_rule_t;
 
+// Phase 6 detour: transactional scoped symbol tables, used by the new
+// '{table}' lookup primitive and 'rule>table' store suffix (see grammar_t
+// below for the frame stack these read/write). One entry is one stored
+// name in one named table, e.g. {table: "generics", key: "T"}.
+typedef struct {
+	string table;
+	string key;
+} symbol_entry_t;
+// One frame = everything stored during one in-flight PEG attempt (one
+// alternative try, or one []/[]? repetition attempt). Frames are pushed at
+// every point the engine already saves/restores iterstring_t.index for
+// backtracking; on failure the frame is discarded outright ("vanish"), on
+// success its entries are appended onto the new top frame ("materialize") -
+// see pushSymbolFrame/vanishSymbolFrame/materializeSymbolFrame in parser.c.
+typedef dynarray(symbol_entry_t) symbol_frame_t;
+
 typedef struct {
 	type_modifier_t type_mod;
 	option(string) storage_key; // if none, then discard output
+	// Phase 6 detour: 'rule>table' suffix - if set, the matched TEXT is
+	// stored into this table (in the current transaction frame) when this
+	// rule_t succeeds. Independent of storage_key - a rule can both
+	// contribute to the enclosing object under a key AND be recorded into
+	// a symbol table.
+	option(string) store_table;
 	enum {
 		is_literal,
 		is_rule,
 		is_inline,
+		is_table_lookup, // '{table}' - matches an identifier iff it is
+		                  // currently visible in `table`
 	} literal_or_rule;
 	union {
 		struct {
@@ -103,6 +127,7 @@ typedef struct {
 		};
 		string literal;
 		inline_rule_t inl;
+		string table_lookup_name; // valid when literal_or_rule == is_table_lookup
 	};	
 } rule_t;
 
@@ -129,6 +154,14 @@ struct grammar_entry {
 
 typedef struct {
 	dynarray(grammar_entry_t) entry;
+	// Phase 6 detour: stack of transaction frames for '{table}'/'>table'
+	// scoped symbol tables. Pool-allocated here so it lives exactly as long
+	// as the compiled grammar_t itself (per design). Always has at least
+	// one frame (the committed root) while a grammar_t is valid - pushed by
+	// compileGrammar(), reset to one empty frame at the start of every
+	// parseIntoObject() call so tables don't leak between separate parses
+	// reusing the same compiled grammar.
+	dynarray(symbol_frame_t) symbol_frames;
 } grammar_t;
 
 /*

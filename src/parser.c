@@ -47,6 +47,29 @@ type_modifier_t parseTypeModifier(iterstring_t *rule) {
 		return ret;	
 }
 
+// Phase 6 detour: parses an optional '>tablename' suffix, tried right after
+// the type modifier (so 'rule[]>table', 'rule?>table', and plain
+// 'rule>table' all work). Returns none if no '>' is present (leaves the
+// position untouched) or if '>' isn't followed by a valid identifier
+// (treated as "no suffix", not a hard parse error - matches this file's
+// general lenient-backtracking style for optional suffixes).
+static option(string) parseStoreTableSuffix(iterstring_t *rule) {
+	if(rule->str.at[rule->index] != '>') {
+		iterstringReset(rule);
+		return (option(string)) none;
+	}
+	rule->index++;
+	iterstringAdvance(rule);
+
+	option(string) name = parseIdentifier(rule);
+	if(!name.valid) {
+		iterstringReset(rule);
+		return (option(string)) none;
+	}
+	iterstringAdvance(rule);
+	return name;
+}
+
 option(string) parseLiteral(iterstring_t *rule) {
 	if(rule->str.data == NULL) {
 	    return (option(string)) none;
@@ -300,13 +323,42 @@ option(rule_t) compileRule(iterstring_t *rule) {
     parseWhitespace(rule);
     
     option(string) res;
+
+    // Phase 6 detour: '{table}' - a new atomic primitive (same binding
+    // tightness as a literal or bare rule reference), matches iff the next
+    // input token is currently visible in symbol table `table`. Tried
+    // before parseLiteral()/'(' so it doesn't need to disambiguate against
+    // them (neither starts with '{').
+    if(rule->str.at[rule->index] == '{') {
+        size_t save = rule->index;
+        rule->index++;
+        option(string) table_name = parseIdentifier(rule);
+        parseWhitespace(rule);
+        if(table_name.valid && rule->str.at[rule->index] == '}') {
+            rule->index++;
+            iterstringAdvance(rule);
+            rule_t ret = {
+                .storage_key = none,
+                .store_table = none,
+                .literal_or_rule = is_table_lookup,
+                .table_lookup_name = table_name.value,
+                .type_mod = parseTypeModifier(rule),
+            };
+            return (option(rule_t)) some(ret);
+        }
+        if(table_name.valid) destroyString(table_name.value);
+        rule->index = save;
+    }
     
     if((res = parseLiteral(rule)).valid) {
+        type_modifier_t mod = parseTypeModifier(rule);
+        option(string) store_table = parseStoreTableSuffix(rule);
         rule_t ret = {
             .storage_key = none,
+            .store_table = store_table,
             .literal_or_rule = is_literal,
             .literal = res.value,
-            .type_mod = parseTypeModifier(rule),		
+            .type_mod = mod,		
         };
         return (option(rule_t)) some(ret);
     }
@@ -316,11 +368,14 @@ option(rule_t) compileRule(iterstring_t *rule) {
         if(!inl.valid) {
             return (option(rule_t)) none;
         }
+        type_modifier_t mod = parseTypeModifier(rule);
+        option(string) store_table = parseStoreTableSuffix(rule);
         rule_t ret = {
             .storage_key = none,
+            .store_table = store_table,
             .literal_or_rule = is_inline,
             .inl = inl.value,
-            .type_mod = parseTypeModifier(rule),
+            .type_mod = mod,
         };
         return (option(rule_t)) some(ret);
     }
@@ -333,12 +388,38 @@ option(rule_t) compileRule(iterstring_t *rule) {
             iterstringAdvance(rule);
             parseWhitespace(rule);
 
-            if(rule->str.at[rule->index] == '(') {
-                option(inline_rule_t) inl = compileInlineRule(rule);
-                if(inl.valid) {
+            // Phase 6 detour: 'key:{table}' - a keyed lookup, e.g.
+            // typename:{generics}.
+            if(rule->str.at[rule->index] == '{') {
+                size_t save = rule->index;
+                rule->index++;
+                option(string) table_name = parseIdentifier(rule);
+                parseWhitespace(rule);
+                if(table_name.valid && rule->str.at[rule->index] == '}') {
+                    rule->index++;
+                    iterstringAdvance(rule);
                     rule_t ret = {
                         .type_mod = parseTypeModifier(rule),
                         .storage_key = res,
+                        .store_table = none,
+                        .literal_or_rule = is_table_lookup,
+                        .table_lookup_name = table_name.value,
+                    };
+                    return (option(rule_t)) some(ret);
+                }
+                if(table_name.valid) destroyString(table_name.value);
+                rule->index = save;
+            }
+
+            if(rule->str.at[rule->index] == '(') {
+                option(inline_rule_t) inl = compileInlineRule(rule);
+                if(inl.valid) {
+                    type_modifier_t mod = parseTypeModifier(rule);
+                    option(string) store_table = parseStoreTableSuffix(rule);
+                    rule_t ret = {
+                        .type_mod = mod,
+                        .storage_key = res,
+                        .store_table = store_table,
                         .literal_or_rule = is_inline,
                         .inl = inl.value,
                     };
@@ -350,9 +431,12 @@ option(rule_t) compileRule(iterstring_t *rule) {
 
 			option(string) rule_name = parseIdentifier(rule);
 			if(rule_name.valid) {
+				type_modifier_t mod = parseTypeModifier(rule);
+				option(string) store_table = parseStoreTableSuffix(rule);
 				rule_t ret = {
-					.type_mod = parseTypeModifier(rule),
+					.type_mod = mod,
 					.storage_key = res,
+					.store_table = store_table,
 					.literal_or_rule = is_rule,
 					.rule_name = rule_name.value,
 					.ge = NULL,
@@ -362,9 +446,12 @@ option(rule_t) compileRule(iterstring_t *rule) {
 
 			option(string) literal = parseLiteral(rule);
 			if(literal.valid) {
+				type_modifier_t mod = parseTypeModifier(rule);
+				option(string) store_table = parseStoreTableSuffix(rule);
 				rule_t ret = {
-					.type_mod = parseTypeModifier(rule),
+					.type_mod = mod,
 					.storage_key = res,
+					.store_table = store_table,
 					.literal_or_rule = is_literal,
 					.literal = literal.value,	
 				};
@@ -373,12 +460,15 @@ option(rule_t) compileRule(iterstring_t *rule) {
 			destroyString(res.value);
 			return (option(rule_t)) none;
         } else {
+            type_modifier_t mod = parseTypeModifier(rule);
+            option(string) store_table = parseStoreTableSuffix(rule);
             rule_t ret = {
                 .storage_key = none,
+                .store_table = store_table,
                 .literal_or_rule = is_rule,
                 .rule_name = res.value,
                 .ge = NULL,
-                .type_mod = parseTypeModifier(rule),
+                .type_mod = mod,
             };
             return (option(rule_t)) some(ret);
         }
@@ -439,6 +529,12 @@ option(grammar_entry_t) compileGrammarEntry(string rule_definition) {
 option(grammar_t) compileGrammar(size_t count, typeof(string) (*rules)[count]) {
     grammar_t gram;
     gram.entry = create_dynarray(grammar_entry_t);
+    // Phase 6 detour: one root frame always present while a grammar_t is
+    // valid, so top-level '>table'/'{table}' usage (outside any
+    // alternative/repetition) has somewhere to write/read immediately.
+    gram.symbol_frames = create_dynarray(symbol_frame_t);
+    symbol_frame_t root_frame = create_dynarray(symbol_entry_t);
+    dynarray_append(gram.symbol_frames, root_frame);
     
     for(size_t i = 0; i < count; i++) {
         option(grammar_entry_t) entry = compileGrammarEntry((*rules)[i]);
@@ -446,6 +542,7 @@ option(grammar_t) compileGrammar(size_t count, typeof(string) (*rules)[count]) {
             fprintf(stderr, "Failed to compile grammar entry %zu: '%s'\n", 
                     i, (*rules)[i].at);
             destroy_dynarray(gram.entry);
+            destroy_dynarray(gram.symbol_frames);
             return (option(grammar_t)) none;
         }
         dynarray_append(gram.entry, entry.value);
@@ -520,10 +617,15 @@ static void destroyRule(rule_t *rule) {
     if(rule->storage_key.valid) {
         destroyString(rule->storage_key.value);
     }
+    if(rule->store_table.valid) {
+        destroyString(rule->store_table.value);
+    }
     if(rule->literal_or_rule == is_literal) {
         destroyString(rule->literal);
     } else if(rule->literal_or_rule == is_rule) {
         destroyString(rule->rule_name);
+    } else if(rule->literal_or_rule == is_table_lookup) {
+        destroyString(rule->table_lookup_name);
     } else {
         destroyRuleBody(rule->inl.element);
     }
@@ -560,6 +662,18 @@ void destroyGrammar(grammar_t *gram) {
         destroyRuleBody(entry->element);
     }
     destroy_dynarray(gram->entry);
+
+    // Phase 6 detour: tear down whatever frames remain (normally just the
+    // one root frame, reset empty by the last parseIntoObject() call).
+    for(size_t i = 0; i < gram->symbol_frames.count; i++) {
+        symbol_frame_t *frame = &gram->symbol_frames.at[i];
+        for(size_t j = 0; j < frame->count; j++) {
+            destroyString(frame->at[j].table);
+            destroyString(frame->at[j].key);
+        }
+        destroy_dynarray((*frame));
+    }
+    destroy_dynarray(gram->symbol_frames);
 }
 
 static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram);
@@ -631,6 +745,66 @@ void printValue(obj_t_value_t val) {
 
 static option(obj_t_value_t) executeBody(iterstring_t *is, rule_type_t rule_type, rule_node_seq_t *body, grammar_t *gram);
 
+// Phase 6 detour: transactional scoped symbol table helpers (symbol_frame_t
+// declared in parser.h). Called in lockstep with the 4 existing is->index
+// save/restore sites below, so a failed PEG attempt's '>table' stores are
+// discarded exactly when its position rollback happens ("vanish"), and a
+// successful attempt's stores become visible to its immediate parent
+// attempt exactly when its position "commit" (no rollback) happens
+// ("materialize" - append onto the new top frame, NOT the root, so nested
+// alternatives only become permanently visible once every enclosing
+// attempt, up to the top-level rule invocation, has also succeeded).
+static void pushSymbolFrame(grammar_t *gram) {
+    symbol_frame_t frame = create_dynarray(symbol_entry_t);
+    dynarray_append(gram->symbol_frames, frame);
+}
+
+static void vanishSymbolFrame(grammar_t *gram) {
+    symbol_frame_t frame = gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    gram->symbol_frames.count--;
+    for(size_t i = 0; i < frame.count; i++) {
+        destroyString(frame.at[i].table);
+        destroyString(frame.at[i].key);
+    }
+    destroy_dynarray(frame);
+}
+
+static void materializeSymbolFrame(grammar_t *gram) {
+    symbol_frame_t frame = gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    gram->symbol_frames.count--;
+    symbol_frame_t *parent = &gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    for(size_t i = 0; i < frame.count; i++) {
+        // ownership of the entry's strings transfers to the parent frame -
+        // no copy/destroy needed here.
+        dynarray_append((*parent), frame.at[i]);
+    }
+    destroy_dynarray(frame);
+}
+
+static void storeSymbol(grammar_t *gram, string table, string matched_text) {
+    symbol_frame_t *top = &gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    symbol_entry_t entry = {
+        .table = stringFromString(table),
+        .key = stringFromString(matched_text),
+    };
+    dynarray_append((*top), entry);
+}
+
+// Scans every visible frame, innermost (top of stack) first, down to the
+// committed root - so a rule can see its own not-yet-fully-materialized
+// stores from earlier in the same in-flight attempt.
+static bool lookupSymbol(grammar_t *gram, string table, const char *text) {
+    for(size_t f = gram->symbol_frames.count; f-- > 0;) {
+        symbol_frame_t *frame = &gram->symbol_frames.at[f];
+        for(size_t i = 0; i < frame->count; i++) {
+            if(stringeql(frame->at[i].table, table) && strcmp(frame->at[i].key.at, text) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type_modifier_t mod,
                                                            rule_type_t rule_type, rule_node_seq_t *body,
                                                            grammar_t *gram) {
@@ -638,6 +812,7 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
         array_t arr = createEmptyArray();
 
         size_t first_save_pos = is->index;
+        pushSymbolFrame(gram);
         option(obj_t_value_t) first = executeBody(is, rule_type, body, gram);
         if(!first.valid) {
             // Restore position: a failed attempt may have partially
@@ -646,6 +821,7 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
             // partial consumption must not leak out of a zero-or-more
             // ([]?) repetition that ultimately matched zero times.
             is->index = first_save_pos;
+            vanishSymbolFrame(gram);
             if(mod & modifier_optional) {
                 // []? : zero matches is fine, yield an empty array
                 obj_t_value_t ret = {
@@ -657,17 +833,21 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
             destroyArray(arr);
             return (option(obj_t_value_t)) none;
         }
+        materializeSymbolFrame(gram);
 
         arr = insertIntoArray(arr, first.value);
 
         while(1) {
             size_t save_pos = is->index;
+            pushSymbolFrame(gram);
 
             option(obj_t_value_t) next = executeBody(is, rule_type, body, gram);
             if(!next.valid) {
                 is->index = save_pos;
+                vanishSymbolFrame(gram);
                 break;
             }
+            materializeSymbolFrame(gram);
             arr = insertIntoArray(arr, next.value);
         }
 
@@ -679,14 +859,17 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
 
     } else if(mod & modifier_optional) {
         size_t save_pos = is->index;
+        pushSymbolFrame(gram);
         option(obj_t_value_t) opt = executeBody(is, rule_type, body, gram);
         if(!opt.valid) {
             is->index = save_pos;
+            vanishSymbolFrame(gram);
             obj_t_value_t ret = {
                 .discriminant = obj_t_null
             };
             return (option(obj_t_value_t)) some(ret);
         }
+        materializeSymbolFrame(gram);
         return opt;
 
     } else {
@@ -694,7 +877,7 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
     }
 }
 
-static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram) {
+static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, grammar_t *gram) {
     if(rule->literal_or_rule == is_literal) {
         if(!parseLiteralFromInput(is, rule->literal)) {
             return (option(obj_t_value_t)) none;
@@ -711,9 +894,46 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
             return (option(obj_t_value_t)) none;
         }
         return executeRuleBodyWithModifiers(is, rule->type_mod, rule->ge->rule_type, &rule->ge->element, gram);
+    } else if(rule->literal_or_rule == is_table_lookup) {
+        // Phase 6 detour: '{table}' - matches an identifier-shaped token
+        // from the input iff its text is currently visible in `table`.
+        // parseIdentifier() is reused here even though it's also used at
+        // grammar-COMPILE time - it operates generically on any
+        // iterstring_t, so it's equally valid for matching a token out of
+        // the INPUT text being parsed.
+        size_t save_pos = is->index;
+        option(string) matched = parseIdentifier(is);
+        if(!matched.valid) {
+            return (option(obj_t_value_t)) none;
+        }
+        if(!lookupSymbol(gram, rule->table_lookup_name, matched.value.at)) {
+            destroyString(matched.value);
+            is->index = save_pos;
+            return (option(obj_t_value_t)) none;
+        }
+        obj_t_value_t ret = {
+            .discriminant = obj_t_string,
+            .str = matched.value,
+        };
+        return (option(obj_t_value_t)) some(ret);
     } else {
         return executeRuleBodyWithModifiers(is, rule->type_mod, rule->inl.rule_type, &rule->inl.element, gram);
     }
+}
+
+// Wraps executeRuleInner() with the 'rule>table' store suffix: on a
+// successful match, the matched result is flattened to text and recorded
+// into `rule->store_table` (in the current, innermost transaction frame) -
+// see pushSymbolFrame/vanishSymbolFrame/materializeSymbolFrame above for
+// how that store is rolled back if the ENCLOSING attempt ultimately fails.
+static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram) {
+    option(obj_t_value_t) result = executeRuleInner(is, rule, gram);
+    if(result.valid && rule->store_table.valid) {
+        string text = flattenToString(result.value);
+        storeSymbol(gram, rule->store_table.value, text);
+        destroyString(text);
+    }
+    return result;
 }
 
 // executes a single rule_t within a body and folds its result into the
@@ -774,12 +994,14 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
 
     for(size_t i = 0; i < node->alternative.count; i++) {
         size_t save_pos = is->index;
+        pushSymbolFrame(gram);
         rule_sequence_t *seq = &node->alternative.at[i];
 
         string local_str = string("");
         object_t local_obj = createEmptyObject();
 
         if(executeSequenceInto(is, seq, gram, rule_type, &local_str, &local_obj)) {
+            materializeSymbolFrame(gram);
             if(rule_type == implicit_storage) {
                 *str_acc = stringAppendString(*str_acc, local_str);
             } else {
@@ -793,6 +1015,7 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
             return true;
         }
 
+        vanishSymbolFrame(gram);
         destroyString(local_str);
         destroyObject(local_obj);
         is->index = save_pos;
@@ -845,6 +1068,22 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
         fprintf(stderr, "Start rule '%s' not found in grammar\n", start_rule.at);
         return obj;
     }
+
+    // Phase 6 detour: reset the symbol-table frame stack back to a single
+    // empty root frame at the start of every parse - so '{table}'/'>table'
+    // usage doesn't leak entries from a PRIOR parseIntoObject() call that
+    // reused this same compiled grammar_t.
+    for(size_t i = 0; i < gram->symbol_frames.count; i++) {
+        symbol_frame_t *frame = &gram->symbol_frames.at[i];
+        for(size_t j = 0; j < frame->count; j++) {
+            destroyString(frame->at[j].table);
+            destroyString(frame->at[j].key);
+        }
+        destroy_dynarray((*frame));
+    }
+    dynarray_clear(gram->symbol_frames);
+    symbol_frame_t root_frame = create_dynarray(symbol_entry_t);
+    dynarray_append(gram->symbol_frames, root_frame);
     
     grammar_entry_t *start_entry = &gram->entry.at[start_idx.value];
 
