@@ -674,6 +674,10 @@ void destroyGrammar(grammar_t *gram) {
         destroy_dynarray((*frame));
     }
     destroy_dynarray(gram->symbol_frames);
+    destroy_dynarray(gram->trace_stack);
+    if(gram->trace_scratch.at != NULL) {
+        destroyString(gram->trace_scratch);
+    }
 }
 
 static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram);
@@ -754,13 +758,136 @@ static option(obj_t_value_t) executeBody(iterstring_t *is, rule_type_t rule_type
 // ("materialize" - append onto the new top frame, NOT the root, so nested
 // alternatives only become permanently visible once every enclosing
 // attempt, up to the top-level rule invocation, has also succeeded).
-static void pushSymbolFrame(grammar_t *gram) {
-    symbol_frame_t frame = create_dynarray(symbol_entry_t);
-    dynarray_append(gram->symbol_frames, frame);
+// --- the trace ---
+//
+// see parserTraceTo() in parser.h for what a line looks like. everything
+// here only exists with -DENABLE_PARSER_TRACE. without it, trace(...) is
+// nothing at all.
+
+#ifdef ENABLE_PARSER_TRACE
+
+#define TRACE_LOOKAHEAD 24
+
+static void traceJsonString(FILE *stream, const char *text, size_t max_length) {
+    size_t length = 0;
+    while(length < max_length && text[length] != '\0') {
+        length++;
+    }
+    string raw = stringSliceFromCharPtr(text, 0, length);
+    string escaped = stringEscapeJson(raw);
+    fprintf(stream, "\"%s\"", escaped.at);
+    destroyString(raw);
+    destroyString(escaped);
 }
 
-static void vanishSymbolFrame(grammar_t *gram) {
+static char *traceStateOf(const char *event) {
+    struct { char *event; char *state; } states[] = {
+        { "begin", "starting" }, { "enter", "descending" }, { "match", "matched" }, { "fail", "failed" },
+        { "literal", "consuming" }, { "backtrack", "backtracking" }, { "lookup", "looking_up" },
+        { "store", "storing" }, { "frame_push", "attempting" }, { "frame_commit", "committing" },
+        { "frame_rollback", "rolling_back" }, { "end", "finished" },
+    };
+    for(size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+        if(strcmp(states[i].event, event) == 0) {
+            return states[i].state;
+        }
+    }
+    return "unknown";
+}
+
+// writes one line. `extra` is the event's own fields as JSON text that
+// starts with a comma (or is empty), e.g. `,"from":3,"to":1`
+static void traceEvent(grammar_t *gram, iterstring_t *is, const char *event, const char *extra_fmt, ...) {
+    if(gram->trace == NULL) {
+        return;
+    }
+    FILE *out = gram->trace;
+    fprintf(out, "{\"seq\":%zu,\"event\":\"%s\",\"state\":\"%s\"", gram->trace_sequence++, event, traceStateOf(event));
+
+    fprintf(out, ",\"rule\":");
+    traceJsonString(out, gram->trace_stack.count > 0 ? gram->trace_stack.at[gram->trace_stack.count - 1].at : "", SIZE_MAX);
+    fprintf(out, ",\"depth\":%zu,\"stack\":[", gram->trace_stack.count);
+    for(size_t i = 0; i < gram->trace_stack.count; i++) {
+        if(i > 0) fputc(',', out);
+        traceJsonString(out, gram->trace_stack.at[i].at, SIZE_MAX);
+    }
+    fprintf(out, "],\"cursor\":%zu,\"lookahead\":", is->index);
+    traceJsonString(out, is->str.at + is->index, TRACE_LOOKAHEAD);
+
+    fprintf(out, ",\"tables\":{\"frames\":[");
+    for(size_t f = 0; f < gram->symbol_frames.count; f++) {
+        symbol_frame_t *frame = &gram->symbol_frames.at[f];
+        fprintf(out, f > 0 ? ",[" : "[");
+        for(size_t i = 0; i < frame->count; i++) {
+            fprintf(out, i > 0 ? ",{\"table\":" : "{\"table\":");
+            traceJsonString(out, frame->at[i].table.at, SIZE_MAX);
+            fprintf(out, ",\"key\":");
+            traceJsonString(out, frame->at[i].key.at, SIZE_MAX);
+            fputc('}', out);
+        }
+        fputc(']', out);
+    }
+    fprintf(out, "]}");
+
+    va_list args;
+    va_start(args, extra_fmt);
+    vfprintf(out, extra_fmt, args);
+    va_end(args);
+    fprintf(out, "}\n");
+}
+
+// a string that goes into a traced field has to be escaped first. the result
+// lives until the next call, which is long enough to print it.
+static const char *traceEscapedIn(grammar_t *gram, const char *text) {
+    if(gram->trace_scratch.at != NULL) {
+        destroyString(gram->trace_scratch);
+    }
+    string raw = stringFromCharPtr(text);
+    gram->trace_scratch = stringEscapeJson(raw);
+    destroyString(raw);
+    return gram->trace_scratch.at;
+}
+
+#define traceEscaped(text) traceEscapedIn(gram, text)
+#define trace(gram, is, event, ...) traceEvent(gram, is, event, __VA_ARGS__)
+#define traceEnterRule(gram, name) dynarray_append((gram)->trace_stack, name)
+#define traceLeaveRule(gram) ((gram)->trace_stack.count--)
+
+void parserTraceTo(grammar_t *gram, FILE *stream) {
+    gram->trace = stream;
+}
+
+#else
+
+#define trace(gram, is, event, ...) ((void) 0)
+#define traceEnterRule(gram, name) ((void) 0)
+#define traceLeaveRule(gram) ((void) 0)
+
+void parserTraceTo(grammar_t *gram, FILE *stream) {
+    (void) gram;
+    (void) stream;
+}
+
+#endif
+
+// the rules of the symbol tables, as the sentences the trace quotes
+#define STORAGE_RULE_PUSH "an attempt begins (an alternative, a repetition or an optional): what it stores goes into a frame of its own"
+#define STORAGE_RULE_COMMIT "the attempt succeeded: what it stored moves into the enclosing frame"
+#define STORAGE_RULE_ROLLBACK "the attempt failed: what it stored is discarded, as if it had never been stored"
+#define STORAGE_RULE_STORE "rule>table: the matched text is recorded in the innermost frame, it only stays if every enclosing attempt succeeds"
+#define STORAGE_RULE_LOOKUP "{table}: an identifier only matches if it is visible in some frame, the innermost frame is asked first"
+
+static void pushSymbolFrame(grammar_t *gram, iterstring_t *is) {
+    symbol_frame_t frame = create_dynarray(symbol_entry_t);
+    dynarray_append(gram->symbol_frames, frame);
+    trace(gram, is, "frame_push", ",\"frame\":%zu,\"entries\":0,\"storage_rule\":\"%s\"",
+        gram->symbol_frames.count - 1, STORAGE_RULE_PUSH);
+}
+
+static void vanishSymbolFrame(grammar_t *gram, iterstring_t *is) {
     symbol_frame_t frame = gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    trace(gram, is, "frame_rollback", ",\"frame\":%zu,\"entries\":%zu,\"storage_rule\":\"%s\"",
+        gram->symbol_frames.count - 1, frame.count, STORAGE_RULE_ROLLBACK);
     gram->symbol_frames.count--;
     for(size_t i = 0; i < frame.count; i++) {
         destroyString(frame.at[i].table);
@@ -769,8 +896,10 @@ static void vanishSymbolFrame(grammar_t *gram) {
     destroy_dynarray(frame);
 }
 
-static void materializeSymbolFrame(grammar_t *gram) {
+static void materializeSymbolFrame(grammar_t *gram, iterstring_t *is) {
     symbol_frame_t frame = gram->symbol_frames.at[gram->symbol_frames.count - 1];
+    trace(gram, is, "frame_commit", ",\"frame\":%zu,\"entries\":%zu,\"storage_rule\":\"%s\"",
+        gram->symbol_frames.count - 1, frame.count, STORAGE_RULE_COMMIT);
     gram->symbol_frames.count--;
     symbol_frame_t *parent = &gram->symbol_frames.at[gram->symbol_frames.count - 1];
     for(size_t i = 0; i < frame.count; i++) {
@@ -781,27 +910,33 @@ static void materializeSymbolFrame(grammar_t *gram) {
     destroy_dynarray(frame);
 }
 
-static void storeSymbol(grammar_t *gram, string table, string matched_text) {
+static void storeSymbol(grammar_t *gram, iterstring_t *is, string table, string matched_text) {
     symbol_frame_t *top = &gram->symbol_frames.at[gram->symbol_frames.count - 1];
     symbol_entry_t entry = {
         .table = stringFromString(table),
         .key = stringFromString(matched_text),
     };
     dynarray_append((*top), entry);
+    trace(gram, is, "store", ",\"table\":\"%s\",\"key\":\"%s\",\"frame\":%zu,\"storage_rule\":\"%s\"",
+        table.at, traceEscaped(matched_text.at), gram->symbol_frames.count - 1, STORAGE_RULE_STORE);
 }
 
 // Scans every visible frame, innermost (top of stack) first, down to the
 // committed root - so a rule can see its own not-yet-fully-materialized
 // stores from earlier in the same in-flight attempt.
-static bool lookupSymbol(grammar_t *gram, string table, const char *text) {
+static bool lookupSymbol(grammar_t *gram, iterstring_t *is, string table, const char *text) {
     for(size_t f = gram->symbol_frames.count; f-- > 0;) {
         symbol_frame_t *frame = &gram->symbol_frames.at[f];
         for(size_t i = 0; i < frame->count; i++) {
             if(stringeql(frame->at[i].table, table) && strcmp(frame->at[i].key.at, text) == 0) {
+                trace(gram, is, "lookup", ",\"table\":\"%s\",\"key\":\"%s\",\"found\":true,\"frame\":%zu,\"storage_rule\":\"%s\"",
+                    table.at, traceEscaped(text), f, STORAGE_RULE_LOOKUP);
                 return true;
             }
         }
     }
+    trace(gram, is, "lookup", ",\"table\":\"%s\",\"key\":\"%s\",\"found\":false,\"storage_rule\":\"%s\"",
+        table.at, traceEscaped(text), STORAGE_RULE_LOOKUP);
     return false;
 }
 
@@ -812,7 +947,7 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
         array_t arr = createEmptyArray();
 
         size_t first_save_pos = is->index;
-        pushSymbolFrame(gram);
+        pushSymbolFrame(gram, is);
         option(obj_t_value_t) first = executeBody(is, rule_type, body, gram);
         if(!first.valid) {
             // Restore position: a failed attempt may have partially
@@ -820,8 +955,9 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
             // token but then failed on its required operand), and that
             // partial consumption must not leak out of a zero-or-more
             // ([]?) repetition that ultimately matched zero times.
+            trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, first_save_pos);
             is->index = first_save_pos;
-            vanishSymbolFrame(gram);
+            vanishSymbolFrame(gram, is);
             if(mod & modifier_optional) {
                 // []? : zero matches is fine, yield an empty array
                 obj_t_value_t ret = {
@@ -833,21 +969,22 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
             destroyArray(arr);
             return (option(obj_t_value_t)) none;
         }
-        materializeSymbolFrame(gram);
+        materializeSymbolFrame(gram, is);
 
         arr = insertIntoArray(arr, first.value);
 
         while(1) {
             size_t save_pos = is->index;
-            pushSymbolFrame(gram);
+            pushSymbolFrame(gram, is);
 
             option(obj_t_value_t) next = executeBody(is, rule_type, body, gram);
             if(!next.valid) {
+                trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, save_pos);
                 is->index = save_pos;
-                vanishSymbolFrame(gram);
+                vanishSymbolFrame(gram, is);
                 break;
             }
-            materializeSymbolFrame(gram);
+            materializeSymbolFrame(gram, is);
             arr = insertIntoArray(arr, next.value);
         }
 
@@ -859,17 +996,18 @@ static option(obj_t_value_t) executeRuleBodyWithModifiers(iterstring_t *is, type
 
     } else if(mod & modifier_optional) {
         size_t save_pos = is->index;
-        pushSymbolFrame(gram);
+        pushSymbolFrame(gram, is);
         option(obj_t_value_t) opt = executeBody(is, rule_type, body, gram);
         if(!opt.valid) {
+            trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, save_pos);
             is->index = save_pos;
-            vanishSymbolFrame(gram);
+            vanishSymbolFrame(gram, is);
             obj_t_value_t ret = {
                 .discriminant = obj_t_null
             };
             return (option(obj_t_value_t)) some(ret);
         }
-        materializeSymbolFrame(gram);
+        materializeSymbolFrame(gram, is);
         return opt;
 
     } else {
@@ -885,6 +1023,7 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
         if(is->index > gram->last_parse.furthest) {
             gram->last_parse.furthest = is->index;
         }
+        trace(gram, is, "literal", ",\"text\":\"%s\"", traceEscaped(rule->literal.at));
         
         obj_t_value_t ret = {
             .discriminant = obj_t_string,
@@ -896,7 +1035,13 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
             fprintf(stderr, "Unlinked rule reference\n");
             return (option(obj_t_value_t)) none;
         }
-        return executeRuleBodyWithModifiers(is, rule->type_mod, rule->ge->rule_type, &rule->ge->element, gram);
+        [[maybe_unused]] size_t start = is->index;
+        traceEnterRule(gram, rule->rule_name);
+        trace(gram, is, "enter", "%s", "");
+        option(obj_t_value_t) result = executeRuleBodyWithModifiers(is, rule->type_mod, rule->ge->rule_type, &rule->ge->element, gram);
+        trace(gram, is, result.valid ? "match" : "fail", ",\"start\":%zu", start);
+        traceLeaveRule(gram);
+        return result;
     } else if(rule->literal_or_rule == is_table_lookup) {
         // Phase 6 detour: '{table}' - matches an identifier-shaped token
         // from the input iff its text is currently visible in `table`.
@@ -909,8 +1054,9 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
         if(!matched.valid) {
             return (option(obj_t_value_t)) none;
         }
-        if(!lookupSymbol(gram, rule->table_lookup_name, matched.value.at)) {
+        if(!lookupSymbol(gram, is, rule->table_lookup_name, matched.value.at)) {
             destroyString(matched.value);
+            trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, save_pos);
             is->index = save_pos;
             return (option(obj_t_value_t)) none;
         }
@@ -933,7 +1079,7 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
     option(obj_t_value_t) result = executeRuleInner(is, rule, gram);
     if(result.valid && rule->store_table.valid) {
         string text = flattenToString(result.value);
-        storeSymbol(gram, rule->store_table.value, text);
+        storeSymbol(gram, is, rule->store_table.value, text);
         destroyString(text);
     }
     return result;
@@ -1004,14 +1150,14 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
 
     for(size_t i = 0; i < node->alternative.count; i++) {
         size_t save_pos = is->index;
-        pushSymbolFrame(gram);
+        pushSymbolFrame(gram, is);
         rule_sequence_t *seq = &node->alternative.at[i];
 
         string local_str = string("");
         object_t local_obj = createEmptyObject();
 
         if(executeSequenceInto(is, seq, gram, rule_type, &local_str, &local_obj)) {
-            materializeSymbolFrame(gram);
+            materializeSymbolFrame(gram, is);
             if(rule_type == implicit_storage) {
                 *str_acc = stringAppendString(*str_acc, local_str);
             } else {
@@ -1025,9 +1171,10 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
             return true;
         }
 
-        vanishSymbolFrame(gram);
+        vanishSymbolFrame(gram, is);
         destroyString(local_str);
         destroyObject(local_obj);
+        trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, save_pos);
         is->index = save_pos;
     }
 
@@ -1098,14 +1245,23 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
     
     grammar_entry_t *start_entry = &gram->entry.at[start_idx.value];
 
+    gram->trace_sequence = 0;
+    dynarray_clear(gram->trace_stack);
+    traceEnterRule(gram, start_entry->name);
+    trace(gram, &is, "begin", ",\"start_rule\":\"%s\",\"input\":\"%s\"", start_rule.at, traceEscaped(input.at));
+
     option(obj_t_value_t) result = executeGrammarEntry(&is, start_entry, gram);
+
+    gram->last_parse.complete = result.valid && is.str.at[is.index] == '\0';
+    trace(gram, &is, "end", ",\"complete\":%s,\"furthest\":%zu",
+        gram->last_parse.complete ? "true" : "false", gram->last_parse.furthest);
+    traceLeaveRule(gram);
 
     // a failed or incomplete parse is not announced here, the caller reads
     // gram->last_parse and says what it wants to say
     if(!result.valid) {
         return obj;
     }
-    gram->last_parse.complete = is.str.at[is.index] == '\0';
     
     if(result.value.discriminant == obj_t_obj) {
         for(size_t i = 0; i < result.value.obj.count; i++) {

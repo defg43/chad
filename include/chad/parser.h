@@ -169,6 +169,12 @@ typedef struct {
 	// reusing the same compiled grammar.
 	dynarray(symbol_frame_t) symbol_frames;
 	parse_report_t last_parse;
+	// where the parser writes its trace, see parserTraceTo(). always NULL
+	// unless chad is compiled with -DENABLE_PARSER_TRACE.
+	FILE *trace;
+	size_t trace_sequence;
+	dynarray(string) trace_stack;	// the named rules that are being executed, outermost first (names are borrowed)
+	string trace_scratch;			// the last string that was escaped for a line of the trace
 } grammar_t;
 
 /*
@@ -265,6 +271,42 @@ option(rule_node_seq_t) compileRuleBody(iterstring_t *rule);
 option(grammar_entry_t) compileGrammarEntry(string rule_definition);
 
 object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string start_rule);
+
+// the parser trace
+//
+// with -DENABLE_PARSER_TRACE every parseIntoObject() call on gram writes one
+// JSON object per line (JSON Lines) to stream, one for every step the parser
+// takes. every line has the same fields:
+//
+//   seq        number of the line, counting from 0
+//   event      begin | enter | match | fail | literal | backtrack | lookup |
+//              store | frame_push | frame_commit | frame_rollback | end
+//   state      what the parser is doing: starting | descending | matched |
+//              failed | consuming | backtracking | looking_up | storing |
+//              attempting | committing | rolling_back | finished
+//   rule       the innermost named rule that is being executed
+//   depth      how many named rules are being executed
+//   stack      those rules, outermost first
+//   cursor     position in the input
+//   lookahead  the next characters of the input
+//   tables     the symbol tables: {"frames": [[{"table", "key"}, ...], ...]},
+//              the committed root frame first, the innermost attempt last
+//
+// and, depending on the event:
+//
+//   begin           input (the whole text, only here), start_rule
+//   match / fail    start (where the rule started)
+//   literal         text
+//   backtrack       from, to
+//   lookup          table, key, found, frame (where it was found)
+//   store           table, key, frame
+//   frame_*         frame, entries (how many names the frame holds)
+//   end             complete, furthest
+//   storage events  storage_rule: the rule of the symbol tables that was
+//                   applied, as a sentence
+//
+// without the flag this does nothing and the parser contains no trace code.
+void parserTraceTo(grammar_t *gram, FILE *stream);
 
 void printParsingMessage(FILE *stream, char *msg, string source, const char *const color, size_t color_start, size_t color_stop);
 void printGrammar(grammar_t gram);
