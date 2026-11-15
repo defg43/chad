@@ -939,6 +939,23 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
     return result;
 }
 
+static void destroyValue(obj_t_value_t val) {
+    switch(val.discriminant) {
+        case obj_t_string:
+            destroyString(val.str);
+        break;
+        case obj_t_obj:
+            destroyObject(val.obj);
+        break;
+        case obj_t_array:
+            destroyArray(val.arr);
+        break;
+        default:
+        // nothing to destroy
+        break;
+    }
+}
+
 // executes a single rule_t within a body and folds its result into the
 // running accumulator: concatenated (flattened) for implicit_storage bodies,
 // or inserted under its storage key for object_storage bodies
@@ -953,24 +970,14 @@ static bool executeElementInto(iterstring_t *is, rule_t *rule, grammar_t *gram,
         string part = flattenToString(val.value);
         *str_acc = stringAppendString(*str_acc, part);
 
-        switch(val.value.discriminant) {
-            case obj_t_string:
-                destroyString(val.value.str);
-            break;
-            case obj_t_obj:
-                destroyObject(val.value.obj);
-            break;
-            case obj_t_array:
-                destroyArray(val.value.arr);
-            break;
-            default:
-            // dc
-            break;
-        }
+        destroyValue(val.value);
         destroyString(part);
     } else if(rule->storage_key.valid) {
         string key_copy = stringFromString(rule->storage_key.value);
         *obj_acc = insertObjectEntry(*obj_acc, key_copy, val.value);
+    } else {
+        // an element without a storage key is executed, its output is discarded
+        destroyValue(val.value);
     }
     return true;
 }

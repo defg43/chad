@@ -895,18 +895,28 @@ bool stringIsWhitespace(string str) {
     return stringlen(str) > 0;
 }
 
+// makes sure there is room for to_add more bytes after the current content.
+// the buffer at least doubles when it has to grow, so that appending in a
+// loop does not move the whole string every time.
 string stringGrowBuffer(string orig, size_t to_add) {
     if(orig.data == NULL) {
         orig = string("");
     }
     stringHeader_t *hdr = getHeaderPointer(orig);
-    size_t old_bytes = stringbytesalloced(orig);
-    stringHeader_t *new_hdr = realloc(hdr, old_bytes + to_add);
+    size_t needed_bytes = sizeof(stringHeader_t) + hdr->length + to_add + 1;
+    if(hdr->allocated_bytes >= needed_bytes) {
+        return orig;
+    }
+    size_t new_bytes = 2 * hdr->allocated_bytes;
+    if(new_bytes < needed_bytes) {
+        new_bytes = needed_bytes;
+    }
+    stringHeader_t *new_hdr = realloc(hdr, new_bytes);
     if(new_hdr == NULL) {
         fprintf(stderr, "realloc failed in stringGrowBuffer\n");
         exit(EXIT_FAILURE);
     }
-    new_hdr->allocated_bytes += to_add;
+    new_hdr->allocated_bytes = new_bytes;
     new_hdr->data[new_hdr->length] = '\0';
     return (string) { .data = (dataSegmentOfString_t *)new_hdr->data };
 }
@@ -917,7 +927,9 @@ string stringAppendCharPtr(string orig, const char *to_append) {
     my_strncpy(ret.at + stringlen(ret), to_append, append_len);
     getHeaderPointer(ret)->length += append_len;
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
@@ -926,7 +938,9 @@ string stringAppendString(string orig, string to_append) {
     my_strncpy(ret.at + stringlen(ret), to_append.at, stringlen(to_append));
     getHeaderPointer(ret)->length += stringlen(to_append);
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
@@ -935,7 +949,9 @@ string stringAppendChar(string orig, char c) {
     ret.at[stringlen(ret)] = c;
     getHeaderPointer(ret)->length++;
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
@@ -947,7 +963,9 @@ string stringPrependCharPtr(string orig, const char *to_prepend) {
     memcpy(ret.at, to_prepend, prepend_len);
     getHeaderPointer(ret)->length += prepend_len;
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
@@ -959,7 +977,9 @@ string stringPrependString(string orig, string to_prepend) {
     memcpy(ret.at, to_prepend.at, prepend_len);
     getHeaderPointer(ret)->length += prepend_len;
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
@@ -970,7 +990,9 @@ string stringPrependChar(string orig, char c) {
     ret.at[0] = c;  
     getHeaderPointer(ret)->length++;
     ret.at[stringlen(ret)] = '\0';
+    #ifdef DEBUG
     assert(stringlen(ret) == my_strlen(ret.at));
+    #endif
     return ret;
 }
 
