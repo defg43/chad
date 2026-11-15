@@ -28,34 +28,22 @@
 #define dynarray_append(array, element) ({					\
 	bool return_value = false;								\
 	size_t element_byte_size = sizeof(array.at[0]);			\
-	if(array.capacity == 0) {								\
-		void *alloc_result = 								\
-			CSTL_alloc(4 * element_byte_size);				\
-		if(alloc_result) {									\
-			array.at = alloc_result;						\
-			array.capacity = 4;								\
-			return_value = true;							\
-		} else {											\
+	if(array.count >= array.capacity) {						\
+		size_t new_capacity = 								\
+			array.capacity == 0 ? 4 : 2 * array.capacity;	\
+		void *realloc_result =								\
+			CSTL_realloc(array.at, 							\
+			new_capacity * element_byte_size);				\
+		if(realloc_result) {								\
+			array.at = realloc_result;						\
+			array.capacity = new_capacity;					\
+		} else if(array.capacity == 0) {					\
 			fprintf(stderr, 								\
-			"failed to allocated memory for dynamic array");\
+			"failed to allocate memory for dynamic array");	\
 			exit(EXIT_FAILURE);								\
 		}													\
 	}														\
-															\
-	if(array.count >= array.capacity) {						\
-		void *realloc_result =								\
-			CSTL_realloc(array.at, 							\
-			2 * array.capacity * element_byte_size);		\
-		if (realloc_result) {								\
-			array.at = realloc_result;						\
-			array.capacity *= 2;							\
-			array.at[array.count] = element;				\
-			array.count++;									\
-			return_value = true;							\
-		} else {											\
-			return_value = false;							\
-		}													\
-	} else if(array.count < array.capacity) {				\
+	if(array.count < array.capacity) {						\
 		array.at[array.count] = element;					\
 		array.count++;										\
 		return_value = true;								\

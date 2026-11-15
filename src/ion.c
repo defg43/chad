@@ -917,7 +917,7 @@ int valcmp(obj_t_value_t val1, obj_t_value_t val2) {
             return 0;
 
         case obj_t_number: {
-            long double a, b;
+            long double a = 0, b = 0;
             switch(val1.num.number_discriminant) {
                 case number_t_uint64_t: a = (long double) val1.num.as_uint64_t; break;
                 case number_t_int64_t:  a = (long double) val1.num.as_int64_t;  break;

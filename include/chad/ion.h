@@ -17,7 +17,10 @@ typedef void (*destructor_t)(void *ptr);
 typedef typeof(bool (*)(string, size_t *, obj_t_value_t *)) ion_json_parser_t;
 
 typedef struct {
-    obj_t_value_t *array;
+    union {
+        obj_t_value_t *array;
+        obj_t_value_t *at; // same pointer, named so that foreach and lengthof work on an array_t
+    };
     size_t allocated_bytes;
     size_t element_size;
     size_t count;

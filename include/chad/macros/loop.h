@@ -9,7 +9,7 @@
 #include <time.h>
 
 #define loop for(;;)
-#define repeat(num) for(int _hidden_iteartor_i_dont_touch = 0; i < num; num++)
+#define repeat(num) for(size_t _hidden_repeat_counter_dont_touch = 0; _hidden_repeat_counter_dont_touch < (num); _hidden_repeat_counter_dont_touch++)
 
 #define maybe(num) if(({srand(time(NULL); rand() > num * RAND_MAX);}))
 

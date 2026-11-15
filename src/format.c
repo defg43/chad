@@ -755,7 +755,7 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 	
 	size_t index = 0;
 	char ch;
-	while(ch = buf[index]) {
+	while((ch = buf[index])) {
 		dbg("main loop running, the index is %ld\n", index);
 		dbgstr(buf, index);
 		if(ch == '{') {
@@ -779,8 +779,7 @@ char *positionalInsert(char *buf, dictionary_t dictionary) {
 					}
 					len += val_len - 2;
 					if(val_len != 0) {
-						strncpy(buf + index, dictionary.value[dictionary_index - 1], 
-							strlen(dictionary.value[dictionary_index - 1]));
+						memcpy(buf + index, dictionary.value[dictionary_index - 1], val_len);
 					} 
 					dbg("->%s\n", buf);
 				}

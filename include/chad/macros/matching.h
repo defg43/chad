@@ -413,9 +413,9 @@ static inline int _matcher_memcmp(void *a, void *b, size_t size) {
 #define _matcher_simple_compare(a, b) (a == b)
 #define _matcher_simple_unequal(a, b) (a != b)
 
-#define _matcher_anyof_compare(arg1, args...)    			\
+#define _matcher_anyof_compare(arg1, ...)    				\
 	false __VA_OPT__(_foreach2_ladder_entry(  				\
-	|| _matcher_simple_compare, arg1, args)					\
+	|| _matcher_simple_compare, arg1, __VA_ARGS__)			\
 	)
 
 // utility for removing brackets

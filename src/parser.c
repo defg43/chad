@@ -732,7 +732,7 @@ static string flattenToString(obj_t_value_t val) {
 
 void printValue(obj_t_value_t val) {
     if (val.discriminant == obj_t_string) {
-        printf("\"%s\"", val.str);
+        printf("\"%s\"", val.str.at);
     } else if (val.discriminant == obj_t_array) {
         printf("[");
         for (size_t i = 0; i < val.arr.count; i++) {
