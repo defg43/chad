@@ -8,9 +8,6 @@
 #include <assert.h>
 #include <string.h>
 
-int test_str();
-int test_ion();
-int test_format();
 
 static bool findEntry(object_t obj, const char *key, size_t *out_idx) {
     for(size_t i = 0; i < obj.count; i++) {
@@ -110,12 +107,8 @@ static void test_symbol_table_resets_between_parses(void) {
     destroyGrammar(&g.value);
 }
 
-int main() {
-    test_str();
-    test_ion();
-    test_format();
+int test_symbol_table() {
     test_symbol_table_basic();
     test_symbol_table_resets_between_parses();
-    printf("\nAll tests passed.\n");
     return 0;
 }

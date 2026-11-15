@@ -655,9 +655,8 @@ void destroyArray(array_t array) {
         }
     }
     if(array.destructor == NULL) {
+        // an array that never got an element never got a destructor either
         array.destructor = free;
-        fprintf(stderr, 
-            "setting array destructor to free in destructor because it was set to NULL previously\n");
     }
     array.destructor(array.array);
 }

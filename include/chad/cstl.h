@@ -259,15 +259,15 @@
 })
 
 #define stack_pop(stack) ({                                 \
-    struct {												\
-    	typeof(stack.at[0]) value;							\
-    	bool valid;											\
-    } return_value;			                     			\
-    if (stack.count == 0) {                                 \
-        return_value.valid = false;                         \
-    } else {                                                \
+    struct {                                                \
+    	typeof(stack.at[0]) value;                          \
+    	bool valid;                                         \
+    } return_value = { .valid = stack.count > 0 };          \
+    if (return_value.valid) {                               \
         stack.count--;                                      \
-        if (stack.count * 4 < stack.capacity) {             \
+        return_value.value = stack.at[stack.count];         \
+        if (stack.capacity > 4 &&                           \
+        	stack.count * 4 < stack.capacity) {             \
             void *resize_result = CSTL_realloc(stack.at,    \
                 (sizeof(stack.at[0]) * stack.capacity) / 2);\
             if (resize_result) {                            \
@@ -275,9 +275,8 @@
                 stack.capacity /= 2;                        \
             }                                               \
         }                                                   \
-        return_value.value = stack_top(stack);              \
     }                                                       \
-      return_value;                                         \
+    return_value;                                           \
 })
 
 #define stack_top(stack) ({                                 \

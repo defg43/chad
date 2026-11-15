@@ -361,7 +361,7 @@ static void test_utf8(void) {
     
     size_t bytes_read = 0;
     utf32_t cp = stringUtf8DecodeAt(u, 0, &bytes_read);
-    ASSERT_TRUE("utf8 decode first char", bytes_read == 3);
+    ASSERT_TRUE("utf8 decode first char", bytes_read == 3 && cp == 0x3053);
     
     string first = stringUtf8At(u, 0);
     ASSERT_TRUE("utf8 at 0", str_ok(first, "こ"));

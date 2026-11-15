@@ -1,3 +1,5 @@
+#include "../include/chad/macros/foreach.h"
+#include "../include/chad/macros/loop.h"
 #include "../include/chad/cstl.h"
 #include <stdio.h>
 #include <string.h>
@@ -212,7 +214,68 @@ static void test_dynarray_slice(void) {
     destroy_dynarray(arr);
 }
 
+static void test_stack(void) {
+    printf("\n-- stack --\n");
+
+    stack(int) numbers = create_stack(int);
+    stack_push(numbers, 1);
+    stack_push(numbers, 2);
+    stack_push(numbers, 3);
+
+    ASSERT_TRUE("pop hands back the newest element", stack_pop(numbers).value == 3);
+    ASSERT_TRUE("pop then the one below it", stack_pop(numbers).value == 2);
+    ASSERT_TRUE("the last element can be popped", stack_pop(numbers).value == 1);
+    ASSERT_TRUE("pop on an empty stack is not valid", !stack_pop(numbers).valid);
+
+    repeat(20) {
+        stack_push(numbers, 7);
+    }
+    int popped = 0;
+    while(stack_pop(numbers).valid) {
+        popped++;
+    }
+    ASSERT_TRUE("everything that was pushed comes back out", popped == 20);
+
+    destroy_stack(numbers);
+}
+
+static void test_loop_macros(void) {
+    printf("\n-- foreach / repeat / defer --\n");
+
+    int numbers[] = { 1, 2, 3, 4, 5 };
+    int sum = 0;
+    foreach(int number of numbers) {
+        if(number == 2) continue;
+        if(number == 4) break;
+        sum += number;
+    }
+    ASSERT_TRUE("foreach: continue skips an element, break ends the loop", sum == 4);
+
+    size_t last_index = 0;
+    foreach(size_t index in numbers) {
+        last_index = index;
+    }
+    ASSERT_TRUE("foreach: `in` gives every index", last_index == 4);
+
+    int repeats = 0;
+    repeat(3) {
+        repeats++;
+    }
+    ASSERT_TRUE("repeat runs its body n times", repeats == 3);
+
+    int opened = 0, closed = 0, ran = 0;
+    repeat(3) {
+        defer(opened++, closed++) {
+            ran++;
+        }
+    }
+    ASSERT_TRUE("defer runs pre, body and post once, every time it is reached",
+        opened == 3 && closed == 3 && ran == 3);
+}
+
 int test_cstl(void) {
+    test_stack();
+    test_loop_macros();
     test_dynarray_find();
     test_dynarray_any_all();
     test_dynarray_reverse();

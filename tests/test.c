@@ -7,6 +7,7 @@ int test_str();
 int test_ion();
 int test_format();
 int test_cstl();
+int test_symbol_table();
 
 int main() {
 	test_str();
@@ -14,5 +15,6 @@ int main() {
 	test_format();
 	test_parser();
 	test_cstl();
+	test_symbol_table();
   	return 0;
 }
