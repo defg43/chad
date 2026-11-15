@@ -382,7 +382,19 @@ static void test_ion_json_string_escaping(void) {
     destroyObject(roundtrip);
 }
 
+static void test_number_zero(void) {
+    printf("\n-- numbers: zero --\n");
+
+    string unsigned_zero = numberToString(makeNumber((uint64_t)0));
+    string signed_zero = numberToString(makeNumber((int64_t)0));
+    ASSERT_TRUE("an unsigned zero is written as 0", strcmp(unsigned_zero.at, "0") == 0);
+    ASSERT_TRUE("a signed zero is written as 0", strcmp(signed_zero.at, "0") == 0);
+    destroyString(unsigned_zero);
+    destroyString(signed_zero);
+}
+
 int test_ion(void) {
+    test_number_zero();
     test_ion_basic_object();
     test_ion_nested_object();
     test_ion_array();

@@ -29,6 +29,10 @@ rule -> t1:token '(' t2:token ')'
 the modifiers are [] which searches for at least one or more occurences, ? 
 which looks for one or none occurences
 
+an element can be negated by writing ! in front of it: !'a' or !rule succeeds
+exactly where the element would not match, and never consumes any input. it
+is how "this, but not followed by that" is written: '&' !'&'
+
 it is also possible to write rules inline by writing key:(definition), the key is also optional like with other rules
 
 in addition there are alternatives that can be used between elements where only one alternative 
@@ -113,6 +117,9 @@ typedef struct {
 	// contribute to the enclosing object under a key AND be recorded into
 	// a symbol table.
 	option(string) store_table;
+	// '!element': the element must NOT match here. nothing is consumed and
+	// nothing is stored either way (a not-predicate, as in PEG).
+	bool negated;
 	enum {
 		is_literal,
 		is_rule,

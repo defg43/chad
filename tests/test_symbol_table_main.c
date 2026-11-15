@@ -107,8 +107,29 @@ static void test_symbol_table_resets_between_parses(void) {
     destroyGrammar(&g.value);
 }
 
+static void test_not_predicate(void) {
+    typeof(string[]) rules = {
+        string("entry -> a:amp b:rest"),
+        string("amp -> '&' !'&'"),
+        string("rest -> 'x' | '&x'"),
+    };
+    option(grammar_t) g = compileGrammar(sizeof(rules) / sizeof(rules[0]), &rules);
+    expect(g.valid && linkGrammar(&g.value), "grammar with a negated element compiles and links");
+
+    object_t single = parseIntoObject(createEmptyObject(), string("&x"), &g.value, string("entry"));
+    expect(g.value.last_parse.complete, "'&' !'&' matches a single '&'");
+    destroyObject(single);
+
+    object_t twice = parseIntoObject(createEmptyObject(), string("&&x"), &g.value, string("entry"));
+    expect(!g.value.last_parse.complete, "'&' !'&' does not match the first '&' of '&&'");
+    destroyObject(twice);
+
+    destroyGrammar(&g.value);
+}
+
 int test_symbol_table() {
     test_symbol_table_basic();
     test_symbol_table_resets_between_parses();
+    test_not_predicate();
     return 0;
 }

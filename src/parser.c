@@ -321,7 +321,18 @@ static option(inline_rule_t) compileInlineRule(iterstring_t *rule) {
 
 option(rule_t) compileRule(iterstring_t *rule) {
     parseWhitespace(rule);
-    
+
+    // '!element': whatever follows is compiled as usual and then marked
+    if(rule->str.at[rule->index] == '!') {
+        rule->index++;
+        iterstringAdvance(rule);
+        option(rule_t) negated = compileRule(rule);
+        if(negated.valid) {
+            negated.value.negated = true;
+        }
+        return negated;
+    }
+
     option(string) res;
 
     // Phase 6 detour: '{table}' - a new atomic primitive (same binding
@@ -1070,21 +1081,6 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
     }
 }
 
-// Wraps executeRuleInner() with the 'rule>table' store suffix: on a
-// successful match, the matched result is flattened to text and recorded
-// into `rule->store_table` (in the current, innermost transaction frame) -
-// see pushSymbolFrame/vanishSymbolFrame/materializeSymbolFrame above for
-// how that store is rolled back if the ENCLOSING attempt ultimately fails.
-static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram) {
-    option(obj_t_value_t) result = executeRuleInner(is, rule, gram);
-    if(result.valid && rule->store_table.valid) {
-        string text = flattenToString(result.value);
-        storeSymbol(gram, is, rule->store_table.value, text);
-        destroyString(text);
-    }
-    return result;
-}
-
 static void destroyValue(obj_t_value_t val) {
     switch(val.discriminant) {
         case obj_t_string:
@@ -1100,6 +1096,36 @@ static void destroyValue(obj_t_value_t val) {
         // nothing to destroy
         break;
     }
+}
+
+// Wraps executeRuleInner() with the 'rule>table' store suffix: on a
+// successful match, the matched result is flattened to text and recorded
+// into `rule->store_table` (in the current, innermost transaction frame) -
+// see pushSymbolFrame/vanishSymbolFrame/materializeSymbolFrame above for
+// how that store is rolled back if the ENCLOSING attempt ultimately fails.
+static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar_t *gram) {
+    if(rule->negated) {
+        // try the element only to see whether it would match: the position
+        // is put back and whatever it stored is thrown away
+        size_t save_pos = is->index;
+        pushSymbolFrame(gram, is);
+        option(obj_t_value_t) attempt = executeRuleInner(is, rule, gram);
+        vanishSymbolFrame(gram, is);
+        is->index = save_pos;
+        if(attempt.valid) {
+            destroyValue(attempt.value);
+            return (option(obj_t_value_t)) none;
+        }
+        obj_t_value_t nothing = { .discriminant = obj_t_string, .str = string("") };
+        return (option(obj_t_value_t)) some(nothing);
+    }
+    option(obj_t_value_t) result = executeRuleInner(is, rule, gram);
+    if(result.valid && rule->store_table.valid) {
+        string text = flattenToString(result.value);
+        storeSymbol(gram, is, rule->store_table.value, text);
+        destroyString(text);
+    }
+    return result;
 }
 
 // executes a single rule_t within a body and folds its result into the

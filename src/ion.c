@@ -552,6 +552,9 @@ string numberToString(number_t number) {
                 number.as_uint64_t /= 10;
                 ret = stringAppend(ret, digit);
             }
+            if(stringlen(ret) == 0) {
+                ret = stringAppend(ret, "0"); // zero has no digits to peel off
+            }
             stringReverse(ret);
         break;
         case number_t_int64_t:
@@ -563,6 +566,9 @@ string numberToString(number_t number) {
                 digit[0] = '0' + number.as_int64_t % 10;
                 number.as_int64_t /= 10;
                 ret = stringAppend(ret, digit);
+            }
+            if(stringlen(ret) == 0) {
+                ret = stringAppend(ret, "0");
             }
             if(needs_sign) {
                 ret = stringAppend(ret, "-");
