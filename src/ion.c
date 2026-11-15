@@ -679,9 +679,8 @@ void destroyObject(object_t object) {
         }
     }
     if(object.destructor == NULL) {
+        // an object that never got an entry never got a destructor either
         object.destructor = free;
-        fprintf(stderr, 
-            "setting object destructor to free in destructor because it was set to NULL previously\n");
     }
     object.destructor(object.key);
     object.destructor(object.value);

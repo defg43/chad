@@ -152,6 +152,12 @@ struct grammar_entry {
 	rule_node_seq_t element;
 };
 
+// how the last parseIntoObject() call went
+typedef struct {
+	bool complete;		// the start rule matched and consumed the whole input
+	size_t furthest;	// how far into the input any literal was matched, a failed parse went wrong right after it
+} parse_report_t;
+
 typedef struct {
 	dynarray(grammar_entry_t) entry;
 	// Phase 6 detour: stack of transaction frames for '{table}'/'>table'
@@ -162,6 +168,7 @@ typedef struct {
 	// parseIntoObject() call so tables don't leak between separate parses
 	// reusing the same compiled grammar.
 	dynarray(symbol_frame_t) symbol_frames;
+	parse_report_t last_parse;
 } grammar_t;
 
 /*

@@ -527,7 +527,7 @@ option(grammar_entry_t) compileGrammarEntry(string rule_definition) {
 }
 
 option(grammar_t) compileGrammar(size_t count, typeof(string) (*rules)[count]) {
-    grammar_t gram;
+    grammar_t gram = { 0 };
     gram.entry = create_dynarray(grammar_entry_t);
     // Phase 6 detour: one root frame always present while a grammar_t is
     // valid, so top-level '>table'/'{table}' usage (outside any
@@ -882,6 +882,9 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
         if(!parseLiteralFromInput(is, rule->literal)) {
             return (option(obj_t_value_t)) none;
         }
+        if(is->index > gram->last_parse.furthest) {
+            gram->last_parse.furthest = is->index;
+        }
         
         obj_t_value_t ret = {
             .discriminant = obj_t_string,
@@ -1062,6 +1065,7 @@ static option(obj_t_value_t) executeGrammarEntry(iterstring_t *is, grammar_entry
 
 object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string start_rule) {
     iterstring_t is = { .str = input, .index = 0, .previous = 0 };
+    gram->last_parse = (parse_report_t) { .complete = false, .furthest = 0 };
     option(size_t) start_idx = findGrammarEntry(gram, &start_rule);
 
     if(!start_idx.valid) {
@@ -1089,15 +1093,12 @@ object_t parseIntoObject(object_t obj, string input, grammar_t *gram, string sta
 
     option(obj_t_value_t) result = executeGrammarEntry(&is, start_entry, gram);
 
+    // a failed or incomplete parse is not announced here, the caller reads
+    // gram->last_parse and says what it wants to say
     if(!result.valid) {
-        fprintf(stderr, "Failed to parse input\n");
         return obj;
     }
-    
-    if(is.str.at[is.index] != '\0') {
-        fprintf(stderr, "Warning: parsing succeeded but %zu characters remain at position %zu\n",
-                stringlen(is.str) - is.index, is.index);
-    }
+    gram->last_parse.complete = is.str.at[is.index] == '\0';
     
     if(result.value.discriminant == obj_t_obj) {
         for(size_t i = 0; i < result.value.obj.count; i++) {
