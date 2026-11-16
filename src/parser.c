@@ -1182,27 +1182,38 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
         pushSymbolFrame(gram, is);
         rule_sequence_t *seq = &node->alternative.at[i];
 
-        string local_str = string("");
-        object_t local_obj = createEmptyObject();
+        // only the accumulator this kind of rule fills is made: this runs for every
+        // alternative that is tried, and most of them fail
+        bool collects_text = rule_type == implicit_storage;
+        string local_str = { 0 };
+        object_t local_obj = { 0 };
+        if(collects_text) {
+            local_str = string("");
+        } else {
+            local_obj = createEmptyObject();
+        }
 
         if(executeSequenceInto(is, seq, gram, rule_type, &local_str, &local_obj)) {
             materializeSymbolFrame(gram, is);
-            if(rule_type == implicit_storage) {
+            if(collects_text) {
                 *str_acc = stringAppendString(*str_acc, local_str);
+                destroyString(local_str);
             } else {
                 for(size_t k = 0; k < local_obj.count; k++) {
                     *obj_acc = insertObjectEntry(*obj_acc, string(local_obj.key[k]),
                         obj_t_value_t_copy(local_obj.value[k]));
                 }
+                destroyObject(local_obj);
             }
-            destroyString(local_str);
-            destroyObject(local_obj);
             return true;
         }
 
         vanishSymbolFrame(gram, is);
-        destroyString(local_str);
-        destroyObject(local_obj);
+        if(collects_text) {
+            destroyString(local_str);
+        } else {
+            destroyObject(local_obj);
+        }
         trace(gram, is, "backtrack", ",\"from\":%zu,\"to\":%zu", is->index, save_pos);
         is->index = save_pos;
     }
@@ -1214,26 +1225,34 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
 // producing either a concatenated string (implicit_storage) or an object
 // (object_storage) depending on rule_type
 static option(obj_t_value_t) executeBody(iterstring_t *is, rule_type_t rule_type, rule_node_seq_t *body, grammar_t *gram) {
-    string str_acc = string("");
-    object_t obj_acc = createEmptyObject();
+    // a rule collects either text or an object, never both
+    bool collects_text = rule_type == implicit_storage;
+    string str_acc = { 0 };
+    object_t obj_acc = { 0 };
+    if(collects_text) {
+        str_acc = string("");
+    } else {
+        obj_acc = createEmptyObject();
+    }
 
     for(size_t i = 0; i < body->count; i++) {
         if(!executeNodeInto(is, &body->at[i], gram, rule_type, &str_acc, &obj_acc)) {
-            destroyString(str_acc);
-            destroyObject(obj_acc);
+            if(collects_text) {
+                destroyString(str_acc);
+            } else {
+                destroyObject(obj_acc);
+            }
             return (option(obj_t_value_t)) none;
         }
     }
 
-    if(rule_type == implicit_storage) {
-        destroyObject(obj_acc);
+    if(collects_text) {
         obj_t_value_t ret = {
             .discriminant = obj_t_string,
             .str = str_acc
         };
         return (option(obj_t_value_t)) some(ret);
     } else {
-        destroyString(str_acc);
         obj_t_value_t ret = {
             .discriminant = obj_t_obj,
             .obj = obj_acc
