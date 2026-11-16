@@ -110,6 +110,7 @@ option(string) parseIdentifier(iterstring_t *rule) {
 	}
 
 	string ret = string("");
+	size_t start = rule->index;
 
 	if((((rule->str.at[rule->index] >= 'A') && (rule->str.at[rule->index] <= 'Z')) ||
 	       ((rule->str.at[rule->index] >= 'a') && (rule->str.at[rule->index] <= 'z')))
@@ -129,7 +130,9 @@ option(string) parseIdentifier(iterstring_t *rule) {
 	    rule->index++;
 	}
 
-	if(rule->index == rule->previous) {
+	// nothing was read. (this used to compare with rule->previous, which still holds the
+	// end of the last identifier after a backtrack, so reading the same identifier again failed)
+	if(rule->index == start) {
 	    iterstringReset(rule);
 	    destroyString(ret);
 	    return (option(string)) none;

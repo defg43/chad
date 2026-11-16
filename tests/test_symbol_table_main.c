@@ -127,9 +127,27 @@ static void test_not_predicate(void) {
     destroyGrammar(&g.value);
 }
 
+// a name that is stored by one rule and looked up by another has to be found even if
+// the parser went back and tried an earlier alternative on the same text first
+static void test_lookup_after_backtracking(void) {
+    typeof(string[]) rules = {
+        string("entry -> decl:declaration[] use:usage"),
+        string("declaration -> 'let' ' ' name:word>names ';' ' '"),
+        string("usage -> a:{names} ' ' b:{names} | a:{names} ';'"),
+        string("word -> 'ab' | 'a' | 'b'"),
+    };
+    option(grammar_t) g = compileGrammar(sizeof(rules) / sizeof(rules[0]), &rules);
+    expect(g.valid && linkGrammar(&g.value), "grammar with a lookup after an alternative compiles and links");
+    object_t obj = parseIntoObject(createEmptyObject(), string("let ab; ab;"), &g.value, string("entry"));
+    expect(g.value.last_parse.complete, "a stored name is found again after the first alternative failed on it");
+    destroyObject(obj);
+    destroyGrammar(&g.value);
+}
+
 int test_symbol_table() {
     test_symbol_table_basic();
     test_symbol_table_resets_between_parses();
     test_not_predicate();
+    test_lookup_after_backtracking();
     return 0;
 }
