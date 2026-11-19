@@ -443,6 +443,19 @@ option(rule_t) compileRule(iterstring_t *rule) {
                 return (option(rule_t)) none;
             }
 
+			// 'key:@' stores where in the input this point is, as a number
+			if(rule->str.at[rule->index] == '@') {
+				rule->index++;
+				iterstringAdvance(rule);
+				rule_t ret = {
+					.type_mod = modifier_none,
+					.storage_key = res,
+					.store_table = none,
+					.literal_or_rule = is_position,
+				};
+				return (option(rule_t)) some(ret);
+			}
+
 			option(string) rule_name = parseIdentifier(rule);
 			if(rule_name.valid) {
 				type_modifier_t mod = parseTypeModifier(rule);
@@ -640,6 +653,8 @@ static void destroyRule(rule_t *rule) {
         destroyString(rule->rule_name);
     } else if(rule->literal_or_rule == is_table_lookup) {
         destroyString(rule->table_lookup_name);
+    } else if(rule->literal_or_rule == is_position) {
+        // nothing to free
     } else {
         destroyRuleBody(rule->inl.element);
     }
@@ -1056,6 +1071,8 @@ static option(obj_t_value_t) executeRuleInner(iterstring_t *is, rule_t *rule, gr
         trace(gram, is, result.valid ? "match" : "fail", ",\"start\":%zu", start);
         traceLeaveRule(gram);
         return result;
+    } else if(rule->literal_or_rule == is_position) {
+        return (option(obj_t_value_t)) some(((obj_t_value_t) { .discriminant = obj_t_number, .num = makeNumber((uint64_t) is->index) }));
     } else if(rule->literal_or_rule == is_table_lookup) {
         // Phase 6 detour: '{table}' - matches an identifier-shaped token
         // from the input iff its text is currently visible in `table`.

@@ -127,6 +127,35 @@ static void test_not_predicate(void) {
     destroyGrammar(&g.value);
 }
 
+// 'key:@' stores the offset where it stands, so a rule can tell where it started
+static void test_position_element(void) {
+    typeof(string[]) rules = {
+        string("entry -> first:item rest:item"),
+        string("item -> blank[]? at:@ word:letters"),
+        string("blank -> ' '"),
+        string("letters -> 'ab' | 'c'"),
+    };
+    option(grammar_t) g = compileGrammar(sizeof(rules) / sizeof(rules[0]), &rules);
+    expect(g.valid && linkGrammar(&g.value), "grammar with a position element compiles and links");
+
+    object_t obj = parseIntoObject(createEmptyObject(), string("ab  c"), &g.value, string("entry"));
+    expect(g.value.last_parse.complete, "a position element reads no input");
+    size_t first, rest;
+    bool found = findEntry(obj, "first", &first) && findEntry(obj, "rest", &rest);
+    expect(found, "both items are stored");
+    if(found) {
+        size_t first_at, rest_at;
+        bool both = findEntry(obj.value[first].obj, "at", &first_at) && findEntry(obj.value[rest].obj, "at", &rest_at);
+        expect(both, "both items have a position");
+        obj_t_value_t at_first = obj.value[first].obj.value[first_at];
+        obj_t_value_t at_rest = obj.value[rest].obj.value[rest_at];
+        expect(at_first.discriminant == obj_t_number && at_first.num.as_uint64_t == 0, "the first item starts at 0");
+        expect(at_rest.discriminant == obj_t_number && at_rest.num.as_uint64_t == 4, "the second item starts after the spaces, at 4");
+    }
+    destroyObject(obj);
+    destroyGrammar(&g.value);
+}
+
 // a name that is stored by one rule and looked up by another has to be found even if
 // the parser went back and tried an earlier alternative on the same text first
 static void test_lookup_after_backtracking(void) {
@@ -148,6 +177,7 @@ int test_symbol_table() {
     test_symbol_table_basic();
     test_symbol_table_resets_between_parses();
     test_not_predicate();
+    test_position_element();
     test_lookup_after_backtracking();
     return 0;
 }

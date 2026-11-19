@@ -126,6 +126,8 @@ typedef struct {
 		is_inline,
 		is_table_lookup, // '{table}' - matches an identifier iff it is
 		                  // currently visible in `table`
+		is_position,     // 'key:@' - no input is read, stores the offset into
+		                  // the input (a number) under key
 	} literal_or_rule;
 	union {
 		struct {
