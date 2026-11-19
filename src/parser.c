@@ -1153,6 +1153,24 @@ static option(obj_t_value_t) executeRule(iterstring_t *is, rule_t *rule, grammar
 // or inserted under its storage key for object_storage bodies
 static bool executeElementInto(iterstring_t *is, rule_t *rule, grammar_t *gram,
                                 rule_type_t rule_type, string *str_acc, object_t *obj_acc) {
+    // a literal is by far the most common element, and most of them are not kept
+    // (or are only appended to text): no value is made for them unless one is stored
+    if(rule->literal_or_rule == is_literal && !rule->negated && !rule->store_table.valid) {
+        if(!parseLiteralFromInput(is, rule->literal)) {
+            return false;
+        }
+        if(is->index > gram->last_parse.furthest) {
+            gram->last_parse.furthest = is->index;
+        }
+        trace(gram, is, "literal", ",\"text\":\"%s\"", traceEscaped(rule->literal.at));
+        if(rule_type == implicit_storage) {
+            *str_acc = stringAppendString(*str_acc, rule->literal);
+        } else if(rule->storage_key.valid) {
+            *obj_acc = insertObjectEntry(*obj_acc, stringFromString(rule->storage_key.value),
+                (obj_t_value_t) { .discriminant = obj_t_string, .str = stringFromString(rule->literal) });
+        }
+        return true;
+    }
     option(obj_t_value_t) val = executeRule(is, rule, gram);
     if(!val.valid) {
         return false;
@@ -1202,32 +1220,36 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
         // only the accumulator this kind of rule fills is made: this runs for every
         // alternative that is tried, and most of them fail
         bool collects_text = rule_type == implicit_storage;
+        // a text that gets nothing appended stays unallocated until it is needed
         string local_str = { 0 };
         object_t local_obj = { 0 };
-        if(collects_text) {
-            local_str = string("");
-        } else {
+        if(!collects_text) {
             local_obj = createEmptyObject();
         }
 
         if(executeSequenceInto(is, seq, gram, rule_type, &local_str, &local_obj)) {
             materializeSymbolFrame(gram, is);
             if(collects_text) {
-                *str_acc = stringAppendString(*str_acc, local_str);
-                destroyString(local_str);
-            } else {
-                for(size_t k = 0; k < local_obj.count; k++) {
-                    *obj_acc = insertObjectEntry(*obj_acc, string(local_obj.key[k]),
-                        obj_t_value_t_copy(local_obj.value[k]));
+                if(local_str.data) {
+                    *str_acc = stringAppendString(*str_acc, local_str);
+                    destroyString(local_str);
                 }
-                destroyObject(local_obj);
+            } else {
+                // what the alternative collected moves over, it is not copied
+                for(size_t k = 0; k < local_obj.count; k++) {
+                    *obj_acc = insertObjectEntry(*obj_acc, local_obj.key[k], local_obj.value[k]);
+                }
+                free(local_obj.key);
+                free(local_obj.value);
             }
             return true;
         }
 
         vanishSymbolFrame(gram, is);
         if(collects_text) {
-            destroyString(local_str);
+            if(local_str.data) {
+                destroyString(local_str);
+            }
         } else {
             destroyObject(local_obj);
         }
@@ -1244,18 +1266,18 @@ static bool executeNodeInto(iterstring_t *is, rule_node_t *node, grammar_t *gram
 static option(obj_t_value_t) executeBody(iterstring_t *is, rule_type_t rule_type, rule_node_seq_t *body, grammar_t *gram) {
     // a rule collects either text or an object, never both
     bool collects_text = rule_type == implicit_storage;
-    string str_acc = { 0 };
+    string str_acc = { 0 }; // stays unallocated until something is appended
     object_t obj_acc = { 0 };
-    if(collects_text) {
-        str_acc = string("");
-    } else {
+    if(!collects_text) {
         obj_acc = createEmptyObject();
     }
 
     for(size_t i = 0; i < body->count; i++) {
         if(!executeNodeInto(is, &body->at[i], gram, rule_type, &str_acc, &obj_acc)) {
             if(collects_text) {
-                destroyString(str_acc);
+                if(str_acc.data) {
+                    destroyString(str_acc);
+                }
             } else {
                 destroyObject(obj_acc);
             }
@@ -1266,7 +1288,7 @@ static option(obj_t_value_t) executeBody(iterstring_t *is, rule_type_t rule_type
     if(collects_text) {
         obj_t_value_t ret = {
             .discriminant = obj_t_string,
-            .str = str_acc
+            .str = str_acc.data ? str_acc : string("")
         };
         return (option(obj_t_value_t)) some(ret);
     } else {
